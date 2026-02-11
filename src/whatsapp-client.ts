@@ -142,7 +142,7 @@ client.on('qr', (qr: string) => {
         fs.mkdirSync(channelsDir, { recursive: true });
     }
     const qrFile = path.join(channelsDir, 'whatsapp_qr.txt');
-    qrcode.generate(qr, { small: true }, (code) => {
+    qrcode.generate(qr, { small: true }, (code: string) => {
         fs.writeFileSync(qrFile, code);
         log('INFO', 'QR code saved to .tinyclaw/channels/whatsapp_qr.txt');
     });

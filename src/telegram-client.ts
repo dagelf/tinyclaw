@@ -196,16 +196,16 @@ function extFromMime(mime?: string): string {
 const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 
 // Bot ready
-bot.getMe().then((me) => {
+bot.getMe().then((me: TelegramBot.User) => {
     log('INFO', `Telegram bot connected as @${me.username}`);
     log('INFO', 'Listening for messages...');
-}).catch((err) => {
+}).catch((err: Error) => {
     log('ERROR', `Failed to connect: ${err.message}`);
     process.exit(1);
 });
 
 // Message received - Write to queue
-bot.on('message', async (msg) => {
+bot.on('message', async (msg: TelegramBot.Message) => {
     try {
         // Skip group/channel messages - only handle private chats
         if (msg.chat.type !== 'private') {
@@ -437,7 +437,7 @@ setInterval(() => {
 }, 4000);
 
 // Handle polling errors
-bot.on('polling_error', (error) => {
+bot.on('polling_error', (error: Error) => {
     log('ERROR', `Polling error: ${error.message}`);
 });
 
