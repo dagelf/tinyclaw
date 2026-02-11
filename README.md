@@ -1,6 +1,6 @@
 # TinyClaw 🦞
 
-**Multi-channel, multi-team AI assistant** with Discord, WhatsApp, and Telegram integration.
+**Multi-team, multi-channel, 24/7 AI assistant**
 
 Run multiple AI teams simultaneously with isolated workspaces and conversation contexts. Route messages to specialized teams using simple `@team_id` syntax.
 
@@ -55,6 +55,7 @@ tinyclaw start  # Runs interactive setup wizard
 ```
 
 The setup wizard will guide you through:
+
 1. **Channel selection** - Choose Discord, WhatsApp, and/or Telegram
 2. **Bot tokens** - Enter tokens for enabled channels
 3. **Workspace setup** - Name your workspace directory
@@ -84,6 +85,7 @@ The setup wizard will guide you through:
 ### WhatsApp Setup
 
 After starting TinyClaw, scan the QR code:
+
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
      WhatsApp QR Code
@@ -101,40 +103,40 @@ Commands work with `tinyclaw` (if CLI installed) or `./tinyclaw.sh` (direct scri
 
 ### Core Commands
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `start` | Start TinyClaw daemon | `tinyclaw start` |
-| `stop` | Stop all processes | `tinyclaw stop` |
-| `restart` | Restart TinyClaw | `tinyclaw restart` |
-| `status` | Show current status and activity | `tinyclaw status` |
-| `setup` | Run setup wizard (reconfigure) | `tinyclaw setup` |
+| Command       | Description                                               | Example               |
+| ------------- | --------------------------------------------------------- | --------------------- |
+| `start`       | Start TinyClaw daemon                                     | `tinyclaw start`      |
+| `stop`        | Stop all processes                                        | `tinyclaw stop`       |
+| `restart`     | Restart TinyClaw                                          | `tinyclaw restart`    |
+| `status`      | Show current status and activity                          | `tinyclaw status`     |
+| `setup`       | Run setup wizard (reconfigure)                            | `tinyclaw setup`      |
 | `logs [type]` | View logs (discord/telegram/whatsapp/queue/heartbeat/all) | `tinyclaw logs queue` |
-| `attach` | Attach to tmux session | `tinyclaw attach` |
+| `attach`      | Attach to tmux session                                    | `tinyclaw attach`     |
 
 ### Team Commands
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `team list` | List all configured teams | `tinyclaw team list` |
-| `team add` | Add new team (interactive) | `tinyclaw team add` |
-| `team show <id>` | Show team configuration | `tinyclaw team show coder` |
-| `team remove <id>` | Remove a team | `tinyclaw team remove coder` |
-| `team reset <id>` | Reset team conversation | `tinyclaw team reset coder` |
+| Command            | Description                | Example                      |
+| ------------------ | -------------------------- | ---------------------------- |
+| `team list`        | List all configured teams  | `tinyclaw team list`         |
+| `team add`         | Add new team (interactive) | `tinyclaw team add`          |
+| `team show <id>`   | Show team configuration    | `tinyclaw team show coder`   |
+| `team remove <id>` | Remove a team              | `tinyclaw team remove coder` |
+| `team reset <id>`  | Reset team conversation    | `tinyclaw team reset coder`  |
 
 ### Configuration Commands
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `provider [name]` | Show or switch AI provider | `tinyclaw provider anthropic` |
-| `provider <name> --model <model>` | Switch provider and model | `tinyclaw provider openai --model gpt-5.3-codex` |
-| `model [name]` | Show or switch AI model | `tinyclaw model opus` |
-| `reset` | Reset all conversations | `tinyclaw reset` |
-| `channels reset <channel>` | Reset channel authentication | `tinyclaw channels reset whatsapp` |
+| Command                           | Description                  | Example                                          |
+| --------------------------------- | ---------------------------- | ------------------------------------------------ |
+| `provider [name]`                 | Show or switch AI provider   | `tinyclaw provider anthropic`                    |
+| `provider <name> --model <model>` | Switch provider and model    | `tinyclaw provider openai --model gpt-5.3-codex` |
+| `model [name]`                    | Show or switch AI model      | `tinyclaw model opus`                            |
+| `reset`                           | Reset all conversations      | `tinyclaw reset`                                 |
+| `channels reset <channel>`        | Reset channel authentication | `tinyclaw channels reset whatsapp`               |
 
 ### Update Commands
 
-| Command | Description | Example |
-|---------|-------------|---------|
+| Command  | Description                       | Example           |
+| -------- | --------------------------------- | ----------------- |
 | `update` | Update TinyClaw to latest version | `tinyclaw update` |
 
 <details>
@@ -143,11 +145,13 @@ Commands work with `tinyclaw` (if CLI installed) or `./tinyclaw.sh` (direct scri
 **Auto-detection:** TinyClaw checks for updates on startup (once per hour).
 
 **Manual update:**
+
 ```bash
 tinyclaw update
 ```
 
 This will:
+
 1. Check for latest release
 2. Show changelog URL
 3. Download bundle
@@ -155,6 +159,7 @@ This will:
 5. Install new version
 
 **Disable update checks:**
+
 ```bash
 export TINYCLAW_SKIP_UPDATE_CHECK=1
 ```
@@ -163,31 +168,36 @@ export TINYCLAW_SKIP_UPDATE_CHECK=1
 
 ### Messaging Commands
 
-| Command | Description | Example |
-|---------|-------------|---------|
-| `send <message>` | Send message to AI manually | `tinyclaw send "Hello!"` |
-| `send <message>` | Route to specific team | `tinyclaw send "@coder fix bug"` |
+| Command          | Description                 | Example                          |
+| ---------------- | --------------------------- | -------------------------------- |
+| `send <message>` | Send message to AI manually | `tinyclaw send "Hello!"`         |
+| `send <message>` | Route to specific team      | `tinyclaw send "@coder fix bug"` |
+
+### In-Chat Commands
+
+These commands work in Discord, Telegram, and WhatsApp:
+
+| Command            | Description                           | Example                              |
+| ------------------ | ------------------------------------- | ------------------------------------ |
+| `@team_id message` | Route message to specific team        | `@coder fix the bug`                 |
+| `/team`            | List all available teams              | `/team`                              |
+| `@team_id /reset`  | Reset specific team conversation      | `@coder /reset`                      |
+| `/reset`           | Reset conversation (WhatsApp/global)  | `/reset` or `!reset`                 |
+| `message`          | Send to default team (no prefix)      | `help me with this`                  |
+
+**Note:** The `@team_id` routing prefix requires a space after it (e.g., `@coder fix` not `@coderfix`).
 
 ## 🤖 Using Teams
 
 ### Routing Messages
 
-**In Discord, Telegram, or WhatsApp:**
+Use `@team_id` prefix to route messages to specific teams (see [In-Chat Commands](#in-chat-commands) table above):
+
 ```
 @coder fix the authentication bug
 @writer document the API endpoints
 @researcher find papers on transformers
-help me with this  ← goes to default team
-```
-
-**List available teams (in chat):**
-```
-/team
-```
-
-**Reset team conversation (in chat):**
-```
-@coder /reset
+help me with this  ← goes to default team (no prefix needed)
 ```
 
 ### Team Configuration
@@ -218,6 +228,7 @@ Teams are configured in `.tinyclaw/settings.json`:
 ```
 
 Each team operates in isolation:
+
 - **Separate workspace directory** - `~/tinyclaw-workspace/{team_id}/`
 - **Own conversation history** - Maintained by CLI
 - **Custom configuration** - `.claude/`, `heartbeat.md`, `AGENTS.md`
@@ -227,6 +238,7 @@ Each team operates in isolation:
 <summary><b>📖 Learn more about teams</b></summary>
 
 See [docs/TEAM_OF_AGENTS.md](docs/TEAM_OF_AGENTS.md) for:
+
 - Architecture details
 - Team configuration
 - Use cases and examples
@@ -272,6 +284,7 @@ See [docs/TEAM_OF_AGENTS.md](docs/TEAM_OF_AGENTS.md) for:
 ```
 
 **Key features:**
+
 - **File-based queue** - Atomic operations, no race conditions
 - **Parallel teams** - Different teams process messages concurrently
 - **Sequential per team** - Preserves conversation order within each team
@@ -281,6 +294,7 @@ See [docs/TEAM_OF_AGENTS.md](docs/TEAM_OF_AGENTS.md) for:
 <summary><b>📖 Learn more about the queue system</b></summary>
 
 See [docs/QUEUE.md](docs/QUEUE.md) for:
+
 - Detailed message flow
 - Parallel processing explanation
 - Performance characteristics
@@ -360,8 +374,10 @@ nano ~/tinyclaw-workspace/coder/heartbeat.md
 ```
 
 Default heartbeat prompt:
+
 ```markdown
 Check for:
+
 1. Pending tasks
 2. Errors
 3. Unread messages
@@ -372,6 +388,7 @@ Take action if needed.
 ## 🎯 Use Cases
 
 ### Personal AI Assistant
+
 ```
 You: "Remind me to call mom"
 Claude: "I'll remind you!"
@@ -380,6 +397,7 @@ Claude: "Don't forget to call mom!"
 ```
 
 ### Multi-Team Workflow
+
 ```
 @coder Review and fix bugs in auth.ts
 @writer Document the changes
@@ -387,6 +405,7 @@ Claude: "Don't forget to call mom!"
 ```
 
 ### Cross-Device Access
+
 - WhatsApp on phone
 - Discord on desktop
 - Telegram anywhere
@@ -394,40 +413,11 @@ Claude: "Don't forget to call mom!"
 
 All channels share team conversations!
 
-## 🛠️ Development
-
-### Creating a Release Bundle
-
-```bash
-./scripts/bundle.sh
-```
-
-Creates `tinyclaw-bundle-{version}.tar.gz` with:
-- Pre-built dist/
-- Production node_modules/
-- All scripts and configs
-
-### Automated Releases
-
-Push a version tag to trigger GitHub Actions:
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-GitHub Actions will:
-1. Build bundle
-2. Create release
-3. Upload bundle
-4. Remote installer uses it automatically
-
 ## 📚 Documentation
 
 - [TEAM_OF_AGENTS.md](docs/TEAM_OF_AGENTS.md) - Team management and routing
 - [QUEUE.md](docs/QUEUE.md) - Queue system and message flow
 - [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Common issues and solutions
-- [AGENTS.md](AGENTS.md) - Original design document
 
 ## 🐛 Troubleshooting
 
@@ -450,19 +440,21 @@ tinyclaw logs all
 ```
 
 **Common issues:**
+
 - Bash version error → Install bash 4.0+: `brew install bash`
 - WhatsApp not connecting → Reset auth: `tinyclaw channels reset whatsapp`
 - Messages stuck → Clear queue: `rm -rf .tinyclaw/queue/processing/*`
 - Team not found → Check: `tinyclaw team list`
 
 **Need help?**
+
 - [GitHub Issues](https://github.com/jlia0/tinyclaw/issues)
 - Check logs: `tinyclaw logs all`
 
 ## 🙏 Credits
 
 - Inspired by [OpenClaw](https://openclaw.ai/) by Peter Steinberger
-- Built on [Claude Code](https://claude.com/claude-code)
+- Built on [Claude Code](https://claude.com/claude-code) and [Codex CLI](https://docs.openai.com/codex)
 - Uses [discord.js](https://discord.js.org/), [whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js), [node-telegram-bot-api](https://github.com/yagop/node-telegram-bot-api)
 
 ## 📄 License
@@ -471,6 +463,6 @@ MIT
 
 ---
 
-**TinyClaw - Small but mighty!** 🦞✨
+**TinyClaw - Tiny but mighty!** 🦞✨
 
 [![Star History Chart](https://api.star-history.com/svg?repos=jlia0/tinyclaw&type=date&legend=top-left)](https://www.star-history.com/#jlia0/tinyclaw&type=date&legend=top-left)

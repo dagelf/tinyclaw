@@ -566,8 +566,6 @@ Potential features for team management:
 
 ## See Also
 
-- [AGENTS.md](../AGENTS.md) - Original design document
 - [README.md](../README.md) - Main project documentation
-- [REFACTOR_SUMMARY.md](../REFACTOR_SUMMARY.md) - Details of the agent→team refactor
 - Setup wizard: `./tinyclaw.sh setup`
 - Team CLI: `./tinyclaw.sh team --help`
