@@ -402,6 +402,13 @@ echo -e "${GREEN}✓ Created workspace: $WORKSPACE_PATH${NC}"
 TINYCLAW_HOME="$HOME/.tinyclaw"
 mkdir -p "$TINYCLAW_HOME"
 mkdir -p "$TINYCLAW_HOME/logs"
+touch "$TINYCLAW_HOME/logs/daemon.log" \
+      "$TINYCLAW_HOME/logs/queue.log" \
+      "$TINYCLAW_HOME/logs/heartbeat.log"
+# Touch per-channel logs so status/logs commands work immediately
+for ch in "${ALL_CHANNELS[@]}"; do
+    touch "$TINYCLAW_HOME/logs/${ch}.log"
+done
 if [ -d "$PROJECT_ROOT/.claude" ]; then
     cp -r "$PROJECT_ROOT/.claude" "$TINYCLAW_HOME/"
 fi

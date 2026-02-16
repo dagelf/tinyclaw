@@ -53,7 +53,7 @@ const DEFAULT_PROVIDER_REGISTRY: ProviderRegistry = {
         qoder: {
             display_name: 'Qoder',
             executable: 'qodercli',
-            args: ['-w', '{{cwd}}', '{{?model}}--model', '{{model}}', '{{?resume}}-c', '-p', '{{message}}'],
+            args: ['--workspace', '{{cwd}}', '{{?model}}--model', '{{model}}', '{{?resume}}--resume', '{{resume}}', '--print', '{{message}}'],
             output: { type: 'plain' },
             models: {
                 'auto': 'auto',
