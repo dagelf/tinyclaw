@@ -33,6 +33,7 @@ source "$SCRIPT_DIR/lib/daemon.sh"
 source "$SCRIPT_DIR/lib/messaging.sh"
 source "$SCRIPT_DIR/lib/agents.sh"
 source "$SCRIPT_DIR/lib/teams.sh"
+source "$SCRIPT_DIR/lib/swarm.sh"
 source "$SCRIPT_DIR/lib/pairing.sh"
 source "$SCRIPT_DIR/lib/update.sh"
 
@@ -375,6 +376,64 @@ case "${1:-}" in
                 ;;
         esac
         ;;
+    swarm)
+        case "${2:-}" in
+            list|ls)
+                swarm_list
+                ;;
+            add)
+                swarm_add
+                ;;
+            remove|rm)
+                if [ -z "$3" ]; then
+                    echo "Usage: $0 swarm remove <swarm_id>"
+                    exit 1
+                fi
+                swarm_remove "$3"
+                ;;
+            show)
+                if [ -z "$3" ]; then
+                    echo "Usage: $0 swarm show <swarm_id>"
+                    exit 1
+                fi
+                swarm_show "$3"
+                ;;
+            run)
+                if [ -z "$3" ]; then
+                    echo "Usage: $0 swarm run <swarm_id> <message>"
+                    exit 1
+                fi
+                shift 2  # remove 'swarm' and 'run'
+                swarm_run "$@"
+                ;;
+            *)
+                echo "Usage: $0 swarm {list|add|remove|show|run}"
+                echo ""
+                echo "Swarm Commands:"
+                echo "  list                   List all configured swarms"
+                echo "  add                    Add a new swarm interactively"
+                echo "  remove <id>            Remove a swarm"
+                echo "  show <id>              Show swarm configuration"
+                echo "  run <id> <message>     Trigger a swarm job from CLI"
+                echo ""
+                echo "Examples:"
+                echo "  $0 swarm list"
+                echo "  $0 swarm add"
+                echo "  $0 swarm show pr-reviewer"
+                echo "  $0 swarm remove pr-reviewer"
+                echo "  $0 swarm run pr-reviewer 'review PRs in owner/repo'"
+                echo ""
+                echo "Swarms process large-scale tasks using map-reduce:"
+                echo "  1. Input:  Items from command output, file, or inline data"
+                echo "  2. Split:  Divide items into batches"
+                echo "  3. Map:    Process batches in parallel using worker agents"
+                echo "  4. Reduce: Aggregate results (concatenate, summarize, or hierarchical)"
+                echo ""
+                echo "In chat, use '@swarm_id message' to trigger a swarm."
+                exit 1
+                ;;
+        esac
+        ;;
     pairing)
         pairing_command "${2:-}" "${3:-}"
         ;;
@@ -391,7 +450,7 @@ case "${1:-}" in
         local_names=$(IFS='|'; echo "${ALL_CHANNELS[*]}")
         echo -e "${BLUE}TinyClaw - Claude Code + Messaging Channels${NC}"
         echo ""
-        echo "Usage: $0 {start|stop|restart|status|setup|send|logs|reset <agent_id>|channels|provider|model|agent|team|pairing|update|attach}"
+        echo "Usage: $0 {start|stop|restart|status|setup|send|logs|reset <agent_id>|channels|provider|model|agent|team|swarm|pairing|update|attach}"
         echo ""
         echo "Commands:"
         echo "  start                    Start TinyClaw"
@@ -407,6 +466,7 @@ case "${1:-}" in
         echo "  model [name]             Show or switch AI model"
         echo "  agent {list|add|remove|show|reset|provider}  Manage agents"
         echo "  team {list|add|remove|show|visualize}  Manage teams"
+        echo "  swarm {list|add|remove|show|run}  Manage swarms (map-reduce)"
         echo "  pairing {pending|approved|list|approve <code>|unpair <channel> <sender_id>}  Manage sender approvals"
         echo "  update                   Update TinyClaw to latest version"
         echo "  attach                   Attach to tmux session"
@@ -422,6 +482,8 @@ case "${1:-}" in
         echo "  $0 agent add"
         echo "  $0 team list"
         echo "  $0 team visualize dev"
+        echo "  $0 swarm list"
+        echo "  $0 swarm run pr-reviewer 'review PRs in owner/repo'"
         echo "  $0 pairing pending"
         echo "  $0 pairing approve ABCD1234"
         echo "  $0 pairing unpair telegram 123456789"

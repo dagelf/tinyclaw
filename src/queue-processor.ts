@@ -20,11 +20,12 @@ import { MessageData, ResponseData, QueueFile, ChainStep, Conversation, TeamConf
 import {
     QUEUE_INCOMING, QUEUE_OUTGOING, QUEUE_PROCESSING,
     LOG_FILE, EVENTS_DIR, CHATS_DIR, FILES_DIR,
-    getSettings, getAgents, getTeams
+    getSettings, getAgents, getTeams, getSwarms
 } from './lib/config';
 import { log, emitEvent } from './lib/logging';
 import { parseAgentRouting, findTeamForAgent, getAgentResetFlag, extractTeammateMentions } from './lib/routing';
 import { invokeAgent } from './lib/invoke';
+import { processSwarmJob } from './swarm/swarm-processor';
 
 // Ensure directories exist
 [QUEUE_INCOMING, QUEUE_OUTGOING, QUEUE_PROCESSING, FILES_DIR, path.dirname(LOG_FILE)].forEach(dir => {
@@ -244,6 +245,44 @@ async function processMessage(messageFile: string): Promise<void> {
 
         // Get workspace path from settings
         const workspacePath = settings?.workspace?.path || path.join(require('os').homedir(), 'tinyclaw-workspace');
+
+        // Check for swarm routing first (only external messages)
+        const swarms = getSwarms(settings);
+        if (!isInternal && !messageData.agent) {
+            const swarmMatch = rawMessage.match(/^@(\S+)\s+([\s\S]*)$/);
+            if (swarmMatch) {
+                const candidateSwarmId = swarmMatch[1].toLowerCase();
+                const swarmConfig = swarms[candidateSwarmId];
+                if (swarmConfig) {
+                    // This message targets a swarm — hand off to swarm processor
+                    const swarmAgentId = swarmConfig.agent;
+                    const swarmAgent = agents[swarmAgentId];
+                    if (!swarmAgent) {
+                        log('ERROR', `Swarm '${candidateSwarmId}' references unknown agent '${swarmAgentId}'`);
+                    } else {
+                        log('INFO', `Routing to swarm: ${swarmConfig.name} (${candidateSwarmId}) via agent @${swarmAgentId}`);
+                        emitEvent('swarm_routed', { swarmId: candidateSwarmId, swarmName: swarmConfig.name, agentId: swarmAgentId });
+
+                        // Update message with prefix stripped
+                        messageData.message = swarmMatch[2];
+
+                        await processSwarmJob(
+                            candidateSwarmId,
+                            swarmConfig,
+                            messageData,
+                            swarmAgentId,
+                            swarmAgent,
+                            workspacePath,
+                            agents,
+                            teams
+                        );
+
+                        fs.unlinkSync(processingFile);
+                        return;
+                    }
+                }
+            }
+        }
 
         // Route message to agent (or team)
         let agentId: string;
@@ -485,10 +524,20 @@ function peekAgentId(filePath: string): string {
         const settings = getSettings();
         const agents = getAgents(settings);
         const teams = getTeams(settings);
+        const swarms = getSwarms(settings);
 
         // Check for pre-routed agent
         if (messageData.agent && agents[messageData.agent]) {
             return messageData.agent;
+        }
+
+        // Check for swarm routing — use a dedicated chain key so swarm
+        // processing doesn't block the underlying agent's regular messages
+        if (!messageData.conversationId) {
+            const swarmMatch = (messageData.message || '').match(/^@(\S+)\s/);
+            if (swarmMatch && swarms[swarmMatch[1].toLowerCase()]) {
+                return `swarm:${swarmMatch[1].toLowerCase()}`;
+            }
         }
 
         // Parse @agent_id or @team_id prefix
@@ -553,11 +602,12 @@ async function processQueue(): Promise<void> {
     }
 }
 
-// Log agent and team configuration on startup
+// Log agent, team, and swarm configuration on startup
 function logAgentConfig(): void {
     const settings = getSettings();
     const agents = getAgents(settings);
     const teams = getTeams(settings);
+    const swarms = getSwarms(settings);
 
     const agentCount = Object.keys(agents).length;
     log('INFO', `Loaded ${agentCount} agent(s):`);
@@ -570,6 +620,14 @@ function logAgentConfig(): void {
         log('INFO', `Loaded ${teamCount} team(s):`);
         for (const [id, team] of Object.entries(teams)) {
             log('INFO', `  ${id}: ${team.name} [agents: ${team.agents.join(', ')}] leader=${team.leader_agent}`);
+        }
+    }
+
+    const swarmCount = Object.keys(swarms).length;
+    if (swarmCount > 0) {
+        log('INFO', `Loaded ${swarmCount} swarm(s):`);
+        for (const [id, swarm] of Object.entries(swarms)) {
+            log('INFO', `  ${id}: ${swarm.name} [agent: ${swarm.agent}, concurrency: ${swarm.concurrency || 5}, batch_size: ${swarm.batch_size || 25}]`);
         }
     }
 }

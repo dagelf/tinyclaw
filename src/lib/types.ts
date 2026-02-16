@@ -38,6 +38,7 @@ export interface Settings {
     };
     agents?: Record<string, AgentConfig>;
     teams?: Record<string, TeamConfig>;
+    swarms?: Record<string, import('../swarm/types').SwarmConfig>;
     monitoring?: {
         heartbeat_interval?: number;
     };

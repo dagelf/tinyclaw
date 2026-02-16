@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { jsonrepair } from 'jsonrepair';
 import { Settings, AgentConfig, TeamConfig, CLAUDE_MODEL_IDS, CODEX_MODEL_IDS } from './types';
+import { SwarmConfig } from '../swarm/types';
 
 export const SCRIPT_DIR = path.resolve(__dirname, '../..');
 const _localTinyclaw = path.join(SCRIPT_DIR, '.tinyclaw');
@@ -103,6 +104,13 @@ export function getAgents(settings: Settings): Record<string, AgentConfig> {
  */
 export function getTeams(settings: Settings): Record<string, TeamConfig> {
     return settings.teams || {};
+}
+
+/**
+ * Get all configured swarms.
+ */
+export function getSwarms(settings: Settings): Record<string, SwarmConfig> {
+    return settings.swarms || {};
 }
 
 /**
