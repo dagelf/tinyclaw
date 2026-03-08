@@ -18,14 +18,12 @@ echo -e "${GREEN}  TinyClaw - Setup Wizard${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# --- Channel registry ---
 source "$PROJECT_ROOT/lib/common.sh"
 if ! load_channel_registry; then
     echo -e "${RED}Failed to load channel registry${NC}"
     exit 1
 fi
 
-# Channel selection - simple checklist
 if [ ${#ALL_CHANNELS[@]} -eq 0 ]; then
     echo -e "${RED}No channels available in registry${NC}"
     exit 1
@@ -37,14 +35,14 @@ echo ""
 
 ENABLED_CHANNELS=()
 for ch in "${ALL_CHANNELS[@]}"; do
-    display="${CHANNEL_DISPLAY[$ch]:-$ch}"
+    display="$(channel_display "$ch")"
+    [ -z "$display" ] && display="$ch"
     read -rp "  Enable ${display}? [y/N]: " choice
     if [[ "$choice" =~ ^[yY] ]]; then
         ENABLED_CHANNELS+=("$ch")
         echo -e "    ${GREEN}✓ ${display} enabled${NC}"
     fi
 done
-CHANNEL_CONFIG_JSON="${CHANNEL_CONFIG_JSON%,}"
 echo ""
 
 if [ ${#ENABLED_CHANNELS[@]} -eq 0 ]; then
@@ -52,15 +50,18 @@ if [ ${#ENABLED_CHANNELS[@]} -eq 0 ]; then
     exit 1
 fi
 
-# Collect tokens for channels that need them
-declare -A TOKENS
+_TOKEN_CHANNEL_KEYS=()
+_TOKEN_CHANNEL_VALS=()
+
 for ch in "${ENABLED_CHANNELS[@]}"; do
-    token_key="${CHANNEL_TOKEN_KEY[$ch]:-}"
+    token_key="$(channel_token_key "$ch")"
     if [ -n "$token_key" ]; then
-        prompt="${CHANNEL_TOKEN_PROMPT[$ch]:-Enter token:}"
-        help="${CHANNEL_TOKEN_HELP[$ch]:-}"
-        display="${CHANNEL_DISPLAY[$ch]:-$ch}"
-        echo "${prompt}"
+        prompt="$(channel_token_prompt "$ch")"
+        help="$(channel_token_help "$ch")"
+        display="$(channel_display "$ch")"
+        [ -z "$display" ] && display="$ch"
+        [ -z "$prompt" ] && prompt="Enter token:"
+        echo "$prompt"
         if [ -n "$help" ]; then
             echo -e "${YELLOW}${help}${NC}"
         fi
@@ -71,23 +72,35 @@ for ch in "${ENABLED_CHANNELS[@]}"; do
             echo -e "${RED}${display} bot token is required${NC}"
             exit 1
         fi
-        TOKENS[$ch]="$token_value"
+        _TOKEN_CHANNEL_KEYS+=("$ch")
+        _TOKEN_CHANNEL_VALS+=("$token_value")
         echo -e "${GREEN}✓ ${display} token saved${NC}"
         echo ""
     fi
 done
 
-# Provider selection
+_get_token() {
+    local ch="$1" i
+    for i in "${!_TOKEN_CHANNEL_KEYS[@]}"; do
+        if [ "${_TOKEN_CHANNEL_KEYS[$i]}" = "$ch" ]; then
+            echo "${_TOKEN_CHANNEL_VALS[$i]}"
+            return
+        fi
+    done
+}
+
 echo "Which AI provider?"
 echo ""
 echo "  1) Anthropic (Claude)  (recommended)"
 echo "  2) OpenAI (Codex/GPT)"
+echo "  3) OpenCode"
 echo ""
-read -rp "Choose [1-2]: " PROVIDER_CHOICE
+read -rp "Choose [1-3]: " PROVIDER_CHOICE
 
 case "$PROVIDER_CHOICE" in
     1) PROVIDER="anthropic" ;;
     2) PROVIDER="openai" ;;
+    3) PROVIDER="opencode" ;;
     *)
         echo -e "${RED}Invalid choice${NC}"
         exit 1
@@ -96,18 +109,25 @@ esac
 echo -e "${GREEN}✓ Provider: $PROVIDER${NC}"
 echo ""
 
-# Model selection based on provider
 if [ "$PROVIDER" = "anthropic" ]; then
     echo "Which Claude model?"
     echo ""
     echo "  1) Sonnet  (fast, recommended)"
     echo "  2) Opus    (smartest)"
+    echo "  3) Custom  (enter model name)"
     echo ""
-    read -rp "Choose [1-2]: " MODEL_CHOICE
+    read -rp "Choose [1-3]: " MODEL_CHOICE
 
     case "$MODEL_CHOICE" in
         1) MODEL="sonnet" ;;
         2) MODEL="opus" ;;
+        3)
+            read -rp "Enter model name: " MODEL
+            if [ -z "$MODEL" ]; then
+                echo -e "${RED}Model name required${NC}"
+                exit 1
+            fi
+            ;;
         *)
             echo -e "${RED}Invalid choice${NC}"
             exit 1
@@ -115,18 +135,57 @@ if [ "$PROVIDER" = "anthropic" ]; then
     esac
     echo -e "${GREEN}✓ Model: $MODEL${NC}"
     echo ""
+elif [ "$PROVIDER" = "opencode" ]; then
+    echo "Which OpenCode model? (provider/model format)"
+    echo ""
+    echo "  1) opencode/claude-sonnet-4-5  (recommended)"
+    echo "  2) opencode/claude-opus-4-6"
+    echo "  3) opencode/gemini-3-flash"
+    echo "  4) opencode/gemini-3-pro"
+    echo "  5) anthropic/claude-sonnet-4-5"
+    echo "  6) anthropic/claude-opus-4-6"
+    echo "  7) openai/gpt-5.3-codex"
+    echo "  8) Custom  (enter model name)"
+    echo ""
+    read -rp "Choose [1-8, default: 1]: " MODEL_CHOICE
+
+    case "$MODEL_CHOICE" in
+        2) MODEL="opencode/claude-opus-4-6" ;;
+        3) MODEL="opencode/gemini-3-flash" ;;
+        4) MODEL="opencode/gemini-3-pro" ;;
+        5) MODEL="anthropic/claude-sonnet-4-5" ;;
+        6) MODEL="anthropic/claude-opus-4-6" ;;
+        7) MODEL="openai/gpt-5.3-codex" ;;
+        8)
+            read -rp "Enter model name (e.g. provider/model): " MODEL
+            if [ -z "$MODEL" ]; then
+                echo -e "${RED}Model name required${NC}"
+                exit 1
+            fi
+            ;;
+        *) MODEL="opencode/claude-sonnet-4-5" ;;
+    esac
+    echo -e "${GREEN}✓ Model: $MODEL${NC}"
+    echo ""
 else
-    # OpenAI models
     echo "Which OpenAI model?"
     echo ""
     echo "  1) GPT-5.3 Codex  (recommended)"
     echo "  2) GPT-5.2"
+    echo "  3) Custom  (enter model name)"
     echo ""
-    read -rp "Choose [1-2]: " MODEL_CHOICE
+    read -rp "Choose [1-3]: " MODEL_CHOICE
 
     case "$MODEL_CHOICE" in
         1) MODEL="gpt-5.3-codex" ;;
         2) MODEL="gpt-5.2" ;;
+        3)
+            read -rp "Enter model name: " MODEL
+            if [ -z "$MODEL" ]; then
+                echo -e "${RED}Model name required${NC}"
+                exit 1
+            fi
+            ;;
         *)
             echo -e "${RED}Invalid choice${NC}"
             exit 1
@@ -136,7 +195,6 @@ else
     echo ""
 fi
 
-# Heartbeat interval
 echo "Heartbeat interval (seconds)?"
 echo -e "${YELLOW}(How often Claude checks in proactively)${NC}"
 echo ""
@@ -150,30 +208,29 @@ fi
 echo -e "${GREEN}✓ Heartbeat interval: ${HEARTBEAT_INTERVAL}s${NC}"
 echo ""
 
-# Workspace configuration
 echo "Workspace name (where agent directories will be stored)?"
 echo -e "${YELLOW}(Creates ~/your-workspace-name/)${NC}"
 echo ""
 read -rp "Workspace name [default: tinyclaw-workspace]: " WORKSPACE_INPUT
 WORKSPACE_NAME=${WORKSPACE_INPUT:-tinyclaw-workspace}
-# Clean workspace name
-WORKSPACE_NAME=$(echo "$WORKSPACE_NAME" | tr ' ' '-' | tr -cd 'a-zA-Z0-9_-')
-WORKSPACE_PATH="$HOME/$WORKSPACE_NAME"
+WORKSPACE_NAME=$(echo "$WORKSPACE_NAME" | tr ' ' '-' | tr -cd 'a-zA-Z0-9_/~.-')
+if [[ "$WORKSPACE_NAME" == /* || "$WORKSPACE_NAME" == ~* ]]; then
+  WORKSPACE_PATH="${WORKSPACE_NAME/#\~/$HOME}"
+else
+  WORKSPACE_PATH="$HOME/$WORKSPACE_NAME"
+fi
 echo -e "${GREEN}✓ Workspace: $WORKSPACE_PATH${NC}"
 echo ""
 
-# Default agent name
 echo "Name your default agent?"
 echo -e "${YELLOW}(The main AI assistant you'll interact with)${NC}"
 echo ""
 read -rp "Default agent name [default: assistant]: " DEFAULT_AGENT_INPUT
 DEFAULT_AGENT_NAME=${DEFAULT_AGENT_INPUT:-assistant}
-# Clean agent name
 DEFAULT_AGENT_NAME=$(echo "$DEFAULT_AGENT_NAME" | tr ' ' '-' | tr -cd 'a-zA-Z0-9_-' | tr '[:upper:]' '[:lower:]')
 echo -e "${GREEN}✓ Default agent: $DEFAULT_AGENT_NAME${NC}"
 echo ""
 
-# --- Additional Agents (optional) ---
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}  Additional Agents (Optional)${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -184,18 +241,14 @@ echo ""
 read -rp "Set up additional agents? [y/N]: " SETUP_AGENTS
 
 AGENTS_JSON=""
-# Always create the default agent
 DEFAULT_AGENT_DIR="$WORKSPACE_PATH/$DEFAULT_AGENT_NAME"
-# Capitalize first letter of agent name (proper bash method)
 DEFAULT_AGENT_DISPLAY="$(tr '[:lower:]' '[:upper:]' <<< "${DEFAULT_AGENT_NAME:0:1}")${DEFAULT_AGENT_NAME:1}"
 AGENTS_JSON='"agents": {'
 AGENTS_JSON="$AGENTS_JSON \"$DEFAULT_AGENT_NAME\": { \"name\": \"$DEFAULT_AGENT_DISPLAY\", \"provider\": \"$PROVIDER\", \"model\": \"$MODEL\", \"working_directory\": \"$DEFAULT_AGENT_DIR\" }"
 
-ADDITIONAL_AGENTS=()  # Track additional agent IDs for directory creation
+ADDITIONAL_AGENTS=()
 
 if [[ "$SETUP_AGENTS" =~ ^[yY] ]]; then
-
-    # Add more agents
     ADDING_AGENTS=true
     while [ "$ADDING_AGENTS" = true ]; do
         echo ""
@@ -215,34 +268,44 @@ if [[ "$SETUP_AGENTS" =~ ^[yY] ]]; then
         read -rp "  Display name: " NEW_AGENT_NAME
         [ -z "$NEW_AGENT_NAME" ] && NEW_AGENT_NAME="$NEW_AGENT_ID"
 
-        echo "  Provider: 1) Anthropic  2) OpenAI"
-        read -rp "  Choose [1-2, default: 1]: " NEW_PROVIDER_CHOICE
+        echo "  Provider: 1) Anthropic  2) OpenAI  3) OpenCode"
+        read -rp "  Choose [1-3, default: 1]: " NEW_PROVIDER_CHOICE
         case "$NEW_PROVIDER_CHOICE" in
             2) NEW_PROVIDER="openai" ;;
+            3) NEW_PROVIDER="opencode" ;;
             *) NEW_PROVIDER="anthropic" ;;
         esac
 
         if [ "$NEW_PROVIDER" = "anthropic" ]; then
-            echo "  Model: 1) Sonnet  2) Opus"
-            read -rp "  Choose [1-2, default: 1]: " NEW_MODEL_CHOICE
+            echo "  Model: 1) Sonnet  2) Opus  3) Custom"
+            read -rp "  Choose [1-3, default: 1]: " NEW_MODEL_CHOICE
             case "$NEW_MODEL_CHOICE" in
                 2) NEW_MODEL="opus" ;;
+                3) read -rp "  Enter model name: " NEW_MODEL ;;
                 *) NEW_MODEL="sonnet" ;;
             esac
+        elif [ "$NEW_PROVIDER" = "opencode" ]; then
+            echo "  Model: 1) opencode/claude-sonnet-4-5  2) opencode/claude-opus-4-6  3) opencode/gemini-3-flash  4) anthropic/claude-sonnet-4-5  5) Custom"
+            read -rp "  Choose [1-5, default: 1]: " NEW_MODEL_CHOICE
+            case "$NEW_MODEL_CHOICE" in
+                2) NEW_MODEL="opencode/claude-opus-4-6" ;;
+                3) NEW_MODEL="opencode/gemini-3-flash" ;;
+                4) NEW_MODEL="anthropic/claude-sonnet-4-5" ;;
+                5) read -rp "  Enter model name (e.g. provider/model): " NEW_MODEL ;;
+                *) NEW_MODEL="opencode/claude-sonnet-4-5" ;;
+            esac
         else
-            echo "  Model: 1) GPT-5.3 Codex  2) GPT-5.2"
-            read -rp "  Choose [1-2, default: 1]: " NEW_MODEL_CHOICE
+            echo "  Model: 1) GPT-5.3 Codex  2) GPT-5.2  3) Custom"
+            read -rp "  Choose [1-3, default: 1]: " NEW_MODEL_CHOICE
             case "$NEW_MODEL_CHOICE" in
                 2) NEW_MODEL="gpt-5.2" ;;
+                3) read -rp "  Enter model name: " NEW_MODEL ;;
                 *) NEW_MODEL="gpt-5.3-codex" ;;
             esac
         fi
 
         NEW_AGENT_DIR="$WORKSPACE_PATH/$NEW_AGENT_ID"
-
         AGENTS_JSON="$AGENTS_JSON, \"$NEW_AGENT_ID\": { \"name\": \"$NEW_AGENT_NAME\", \"provider\": \"$NEW_PROVIDER\", \"model\": \"$NEW_MODEL\", \"working_directory\": \"$NEW_AGENT_DIR\" }"
-
-        # Track this agent for directory creation later
         ADDITIONAL_AGENTS+=("$NEW_AGENT_ID")
 
         echo -e "  ${GREEN}✓ Agent '${NEW_AGENT_ID}' added${NC}"
@@ -251,7 +314,6 @@ fi
 
 AGENTS_JSON="$AGENTS_JSON },"
 
-# Build enabled channels array JSON
 CHANNELS_JSON="["
 for i in "${!ENABLED_CHANNELS[@]}"; do
     if [ $i -gt 0 ]; then
@@ -261,24 +323,25 @@ for i in "${!ENABLED_CHANNELS[@]}"; do
 done
 CHANNELS_JSON="${CHANNELS_JSON}]"
 
-# Write settings.json with layered structure
-# Use jq to build valid JSON to avoid escaping issues with agent prompts
 if [ "$PROVIDER" = "anthropic" ]; then
     MODELS_SECTION='"models": { "provider": "anthropic", "anthropic": { "model": "'"${MODEL}"'" } }'
+elif [ "$PROVIDER" = "opencode" ]; then
+    MODELS_SECTION='"models": { "provider": "opencode", "opencode": { "model": "'"${MODEL}"'" } }'
 else
     MODELS_SECTION='"models": { "provider": "openai", "openai": { "model": "'"${MODEL}"'" } }'
 fi
 
 CHANNEL_CONFIG_JSON=""
 for ch in "${ALL_CHANNELS[@]}"; do
-    token_key="${CHANNEL_TOKEN_KEY[$ch]:-}"
+    token_key="$(channel_token_key "$ch")"
     if [ -n "$token_key" ]; then
-        token_value="${TOKENS[$ch]:-}"
+        token_value="$(_get_token "$ch")"
         CHANNEL_CONFIG_JSON="$CHANNEL_CONFIG_JSON\"${ch}\": { \"${token_key}\": \"${token_value}\" },"
     else
         CHANNEL_CONFIG_JSON="$CHANNEL_CONFIG_JSON\"${ch}\": {},"
     fi
 done
+CHANNEL_CONFIG_JSON="${CHANNEL_CONFIG_JSON%,}"
 
 cat > "$SETTINGS_FILE" <<EOF
 {
@@ -298,17 +361,14 @@ cat > "$SETTINGS_FILE" <<EOF
 }
 EOF
 
-# Normalize JSON with jq (fix any formatting issues)
 if command -v jq &> /dev/null; then
     tmp_file="$SETTINGS_FILE.tmp"
     jq '.' "$SETTINGS_FILE" > "$tmp_file" 2>/dev/null && mv "$tmp_file" "$SETTINGS_FILE"
 fi
 
-# Create workspace directory
 mkdir -p "$WORKSPACE_PATH"
 echo -e "${GREEN}✓ Created workspace: $WORKSPACE_PATH${NC}"
 
-# Create ~/.tinyclaw with templates
 TINYCLAW_HOME="$HOME/.tinyclaw"
 mkdir -p "$TINYCLAW_HOME"
 mkdir -p "$TINYCLAW_HOME/logs"
@@ -323,7 +383,6 @@ if [ -f "$PROJECT_ROOT/AGENTS.md" ]; then
 fi
 echo -e "${GREEN}✓ Created ~/.tinyclaw with templates${NC}"
 
-# Create default agent directory with config files
 mkdir -p "$DEFAULT_AGENT_DIR"
 if [ -d "$TINYCLAW_HOME/.claude" ]; then
     cp -r "$TINYCLAW_HOME/.claude" "$DEFAULT_AGENT_DIR/"
@@ -336,11 +395,9 @@ if [ -f "$TINYCLAW_HOME/AGENTS.md" ]; then
 fi
 echo -e "${GREEN}✓ Created default agent directory: $DEFAULT_AGENT_DIR${NC}"
 
-# Create ~/.tinyclaw/files directory for file exchange
 mkdir -p "$TINYCLAW_HOME/files"
 echo -e "${GREEN}✓ Created files directory: $TINYCLAW_HOME/files${NC}"
 
-# Create directories for additional agents
 for agent_id in "${ADDITIONAL_AGENTS[@]}"; do
     AGENT_DIR="$WORKSPACE_PATH/$agent_id"
     mkdir -p "$AGENT_DIR"

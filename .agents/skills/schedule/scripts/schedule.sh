@@ -34,8 +34,8 @@ if [ -z "$TINYCLAW_HOME" ]; then
     fi
 fi
 
-QUEUE_INCOMING="$TINYCLAW_HOME/queue/incoming"
-mkdir -p "$QUEUE_INCOMING"
+API_PORT="${TINYCLAW_API_PORT:-3777}"
+API_BASE="http://localhost:${API_PORT}"
 
 TAG_PREFIX="tinyclaw-schedule"
 
@@ -84,17 +84,33 @@ generate_label() {
     echo "sched-$(date +%s)-$$"
 }
 
-# Build the queue-writer command that cron will execute.
-# It writes a JSON message to the incoming queue directory.
+# Build the cron helper script that POSTs to the API.
 build_cron_command() {
     local agent="$1" message="$2" channel="$3" sender="$4" label="$5"
 
-    # Escape double quotes in the message for JSON safety
-    local escaped_message="${message//\"/\\\"}"
+    # Escape backslashes and double quotes in the message for JSON safety
+    local escaped_message="${message//\\/\\\\}"
+    escaped_message="${escaped_message//\"/\\\"}"
 
-    # The cron command must be a single line for crontab.
-    # Uses printf to write a JSON file into QUEUE_INCOMING each time it fires.
-    printf '%s' "/bin/bash -c 'QUEUE_INCOMING=\"$QUEUE_INCOMING\"; MSG_ID=\"${label}_\$(date +\\%s)_\$\$\"; printf '\\''{ \"channel\": \"$channel\", \"sender\": \"$sender\", \"senderId\": \"${TAG_PREFIX}:${label}\", \"message\": \"@${agent} ${escaped_message}\", \"timestamp\": %s000, \"messageId\": \"%s\" }'\\'' \"\$(date +%s)\" \"\$MSG_ID\" > \"\$QUEUE_INCOMING/\${MSG_ID}.json\"'"
+    # Write a per-schedule helper script that cron will call.
+    # This avoids all crontab % escaping issues by keeping logic in a file.
+    local helper_dir="$TINYCLAW_HOME/schedule-jobs"
+    mkdir -p "$helper_dir"
+    local helper="$helper_dir/${label}.sh"
+
+    cat > "$helper" <<HELPER
+#!/bin/bash
+API_BASE="$API_BASE"
+TS=\$(date +%s)
+MSG_ID="${label}_\${TS}_\$\$"
+curl -s -X POST "\${API_BASE}/api/message" \
+    -H "Content-Type: application/json" \
+    -d "{\"channel\":\"$channel\",\"sender\":\"$sender\",\"senderId\":\"${TAG_PREFIX}:${label}\",\"message\":\"@${agent} ${escaped_message}\",\"messageId\":\"\${MSG_ID}\"}" \
+    > /dev/null 2>&1
+HELPER
+    chmod +x "$helper"
+
+    printf '%s' "$helper"
 }
 
 # ────────────────────────────────────────────
@@ -138,8 +154,12 @@ cmd_create() {
     cron_cmd=$(build_cron_command "$agent" "$message" "$channel" "$sender" "$label")
     local cron_line="${cron_expr} ${cron_cmd} # ${TAG_PREFIX}:${label}"
 
-    # Append to crontab
-    (crontab -l 2>/dev/null || true; echo "$cron_line") | crontab -
+    # Append to crontab using temp file (avoids crontab - hanging in non-TTY environments)
+    local tmpfile
+    tmpfile=$(mktemp)
+    (crontab -l 2>/dev/null || true; echo "$cron_line") > "$tmpfile"
+    crontab "$tmpfile"
+    rm -f "$tmpfile"
 
     echo "Schedule created:"
     echo "  Label:   $label"
@@ -210,16 +230,31 @@ cmd_delete() {
         esac
     done
 
+    local helper_dir="$TINYCLAW_HOME/schedule-jobs"
+
     if $delete_all; then
-        local count
-        count=$(crontab -l 2>/dev/null | grep -c "# ${TAG_PREFIX}:" || echo "0")
+        local entries
+        entries=$(crontab -l 2>/dev/null | grep "# ${TAG_PREFIX}:" || true)
+        local count=0
+        [[ -n "$entries" ]] && count=$(echo "$entries" | wc -l | tr -d ' ')
 
         if [[ "$count" -eq 0 ]]; then
             echo "No tinyclaw schedules to delete."
             return
         fi
 
-        (crontab -l 2>/dev/null | grep -v "# ${TAG_PREFIX}:" || true) | crontab -
+        # Remove helper scripts for all labels
+        while IFS= read -r line; do
+            local lbl
+            lbl=$(echo "$line" | sed "s/.*# ${TAG_PREFIX}://")
+            rm -f "$helper_dir/${lbl}.sh"
+        done <<< "$entries"
+
+        local tmpfile
+        tmpfile=$(mktemp)
+        (crontab -l 2>/dev/null | grep -v "# ${TAG_PREFIX}:" || true) > "$tmpfile"
+        crontab "$tmpfile"
+        rm -f "$tmpfile"
         echo "Deleted $count tinyclaw schedule(s)."
         return
     fi
@@ -230,7 +265,12 @@ cmd_delete() {
         die "No schedule found with label '$label'."
     fi
 
-    (crontab -l 2>/dev/null | grep -v "# ${TAG_PREFIX}:${label}$" || true) | crontab -
+    local tmpfile
+    tmpfile=$(mktemp)
+    (crontab -l 2>/dev/null | grep -v "# ${TAG_PREFIX}:${label}$" || true) > "$tmpfile"
+    crontab "$tmpfile"
+    rm -f "$tmpfile"
+    rm -f "$helper_dir/${label}.sh"
     echo "Deleted schedule: $label"
 }
 

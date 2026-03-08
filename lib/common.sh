@@ -1,25 +1,7 @@
 #!/usr/bin/env bash
 # Common utilities and configuration for TinyClaw
 # Sourced by main tinyclaw.sh script
-
-# Check bash version (need 4.0+ for associative arrays)
-if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
-    echo "Error: This script requires bash 4.0 or higher (you have ${BASH_VERSION})"
-    echo ""
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        echo "macOS ships with bash 3.2. Install a newer version:"
-        echo "  brew install bash"
-        echo ""
-        echo "Then either:"
-        echo "  1. Run with: /opt/homebrew/bin/bash $0"
-        echo "  2. Add to your PATH: export PATH=\"/opt/homebrew/bin:\$PATH\""
-    else
-        echo "Install bash 4.0+ using your package manager:"
-        echo "  Ubuntu/Debian: sudo apt-get install bash"
-        echo "  CentOS/RHEL: sudo yum install bash"
-    fi
-    exit 1
-fi
+# Compatible with bash 3.2+ (no associative arrays)
 
 # Colors
 GREEN='\033[0;32m'
@@ -32,25 +14,68 @@ NC='\033[0m'
 # Source of truth is channels/*.json manifests.
 
 CHANNELS_DIR="$SCRIPT_DIR/channels"
-
 ALL_CHANNELS=()
-declare -A CHANNEL_DISPLAY=()
-declare -A CHANNEL_SCRIPT=()
-declare -A CHANNEL_ALIAS=()
-declare -A CHANNEL_TOKEN_KEY=()
-declare -A CHANNEL_TOKEN_ENV=()
-declare -A CHANNEL_TOKEN_PROMPT=()
-declare -A CHANNEL_TOKEN_HELP=()
+
+_channel_manifest_path() {
+    local channel_id="$1"
+    local manifest="$CHANNELS_DIR/${channel_id}.json"
+    local file
+
+    if [ -f "$manifest" ]; then
+        echo "$manifest"
+        return
+    fi
+
+    for file in "$CHANNELS_DIR"/*.json; do
+        [ -f "$file" ] || continue
+        if [ "$(jq -r '.id // empty' "$file" 2>/dev/null)" = "$channel_id" ]; then
+            echo "$file"
+            return
+        fi
+    done
+}
+
+_channel_manifest_value() {
+    local channel_id="$1"
+    local query="$2"
+    local manifest
+    manifest="$(_channel_manifest_path "$channel_id")"
+    if [ -z "$manifest" ]; then
+        return
+    fi
+    jq -r "${query} // empty" "$manifest" 2>/dev/null
+}
+
+channel_display() {
+    _channel_manifest_value "$1" '.display_name'
+}
+
+channel_script() {
+    _channel_manifest_value "$1" '.script'
+}
+
+channel_alias() {
+    _channel_manifest_value "$1" '.alias'
+}
+
+channel_token_key() {
+    _channel_manifest_value "$1" '.token.settings_key'
+}
+
+channel_token_env() {
+    _channel_manifest_value "$1" '.token.env_var'
+}
+
+channel_token_prompt() {
+    _channel_manifest_value "$1" '.token.prompt'
+}
+
+channel_token_help() {
+    _channel_manifest_value "$1" '.token.help'
+}
 
 load_channel_registry() {
     ALL_CHANNELS=()
-    CHANNEL_DISPLAY=()
-    CHANNEL_SCRIPT=()
-    CHANNEL_ALIAS=()
-    CHANNEL_TOKEN_KEY=()
-    CHANNEL_TOKEN_ENV=()
-    CHANNEL_TOKEN_PROMPT=()
-    CHANNEL_TOKEN_HELP=()
 
     if [ ! -d "$CHANNELS_DIR" ]; then
         echo -e "${RED}Channel registry not found: ${CHANNELS_DIR}${NC}"
@@ -63,46 +88,16 @@ load_channel_registry() {
         return 1
     fi
 
-    local files=()
-    while IFS= read -r f; do
-        files+=("$f")
-    done < <(find "$CHANNELS_DIR" -maxdepth 1 -type f -name '*.json' | sort)
-
-    if [ ${#files[@]} -eq 0 ]; then
-        echo -e "${RED}No channel manifests found in ${CHANNELS_DIR}${NC}"
-        return 1
-    fi
-
-    local file id display script alias token_key token_env token_prompt token_help
-    for file in "${files[@]}"; do
-        id=$(jq -r '.id // empty' "$file")
+    local file
+    while IFS= read -r file; do
+        local id
+        id=$(jq -r '.id // empty' "$file" 2>/dev/null)
         if [ -z "$id" ] || [ "$id" = "null" ]; then
             echo -e "${YELLOW}Skipping invalid channel manifest (missing id): ${file}${NC}"
             continue
         fi
         ALL_CHANNELS+=("$id")
-
-        display=$(jq -r '.display_name // .id // empty' "$file")
-        [ -n "$display" ] && CHANNEL_DISPLAY["$id"]="$display"
-
-        script=$(jq -r '.script // empty' "$file")
-        [ -n "$script" ] && CHANNEL_SCRIPT["$id"]="$script"
-
-        alias=$(jq -r '.alias // empty' "$file")
-        [ -n "$alias" ] && CHANNEL_ALIAS["$id"]="$alias"
-
-        token_key=$(jq -r '.token.settings_key // empty' "$file")
-        [ -n "$token_key" ] && CHANNEL_TOKEN_KEY["$id"]="$token_key"
-
-        token_env=$(jq -r '.token.env_var // empty' "$file")
-        [ -n "$token_env" ] && CHANNEL_TOKEN_ENV["$id"]="$token_env"
-
-        token_prompt=$(jq -r '.token.prompt // empty' "$file")
-        [ -n "$token_prompt" ] && CHANNEL_TOKEN_PROMPT["$id"]="$token_prompt"
-
-        token_help=$(jq -r '.token.help // empty' "$file")
-        [ -n "$token_help" ] && CHANNEL_TOKEN_HELP["$id"]="$token_help"
-    done
+    done < <(find "$CHANNELS_DIR" -maxdepth 1 -type f -name '*.json' | sort)
 
     if [ ${#ALL_CHANNELS[@]} -eq 0 ]; then
         echo -e "${RED}Channel registry loaded zero channels from ${CHANNELS_DIR}${NC}"
@@ -114,8 +109,35 @@ load_channel_registry() {
 
 # Runtime state: filled by load_settings
 ACTIVE_CHANNELS=()
-declare -A CHANNEL_TOKENS=()
 WORKSPACE_PATH=""
+
+# Per-channel token storage (parallel array, bash 3.2 compatible)
+_CHANNEL_TOKEN_KEYS=()
+_CHANNEL_TOKEN_VALS=()
+
+_set_channel_token() {
+    local ch="$1" val="$2"
+    local i
+    for i in "${!_CHANNEL_TOKEN_KEYS[@]}"; do
+        if [ "${_CHANNEL_TOKEN_KEYS[$i]}" = "$ch" ]; then
+            _CHANNEL_TOKEN_VALS[$i]="$val"
+            return
+        fi
+    done
+    _CHANNEL_TOKEN_KEYS+=("$ch")
+    _CHANNEL_TOKEN_VALS+=("$val")
+}
+
+get_channel_token() {
+    local ch="$1"
+    local i
+    for i in "${!_CHANNEL_TOKEN_KEYS[@]}"; do
+        if [ "${_CHANNEL_TOKEN_KEYS[$i]}" = "$ch" ]; then
+            echo "${_CHANNEL_TOKEN_VALS[$i]}"
+            return
+        fi
+    done
+}
 
 # Logging function
 log() {
@@ -129,44 +151,41 @@ load_settings() {
         return 1
     fi
 
-    # Check if jq is available for JSON parsing
     if ! command -v jq &> /dev/null; then
         echo -e "${RED}Error: jq is required for parsing settings${NC}"
         echo "Install with: brew install jq (macOS) or apt-get install jq (Linux)"
         return 1
     fi
 
-    # Validate JSON syntax before attempting to parse
     if ! jq empty "$SETTINGS_FILE" 2>/dev/null; then
         return 2
     fi
 
-    # Load workspace path
     WORKSPACE_PATH=$(jq -r '.workspace.path // empty' "$SETTINGS_FILE" 2>/dev/null)
     if [ -z "$WORKSPACE_PATH" ]; then
-        # Fallback for old configs without workspace
         WORKSPACE_PATH="$HOME/tinyclaw-workspace"
     fi
 
-    # Read enabled channels array
     local channels_json
     channels_json=$(jq -r '.channels.enabled[]' "$SETTINGS_FILE" 2>/dev/null)
-
     if [ -z "$channels_json" ]; then
         return 1
     fi
 
-    # Parse into array
     ACTIVE_CHANNELS=()
     while IFS= read -r ch; do
         ACTIVE_CHANNELS+=("$ch")
     done <<< "$channels_json"
 
-    # Load tokens for each channel from nested structure
+    _CHANNEL_TOKEN_KEYS=()
+    _CHANNEL_TOKEN_VALS=()
     for ch in "${ALL_CHANNELS[@]}"; do
-        local token_key="${CHANNEL_TOKEN_KEY[$ch]:-}"
+        local token_key
+        token_key="$(channel_token_key "$ch")"
         if [ -n "$token_key" ]; then
-            CHANNEL_TOKENS[$ch]=$(jq -r ".channels.${ch}.${token_key} // empty" "$SETTINGS_FILE" 2>/dev/null)
+            local token_val
+            token_val=$(jq -r ".channels.${ch}.${token_key} // empty" "$SETTINGS_FILE" 2>/dev/null)
+            _set_channel_token "$ch" "$token_val"
         fi
     done
 
@@ -176,6 +195,7 @@ load_settings() {
 # Check if a channel is active (enabled in settings)
 is_active() {
     local channel="$1"
+    local ch
     for ch in "${ACTIVE_CHANNELS[@]}"; do
         if [ "$ch" = "$channel" ]; then
             return 0

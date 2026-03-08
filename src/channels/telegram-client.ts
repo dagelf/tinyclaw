@@ -15,21 +15,22 @@ import https from 'https';
 import http from 'http';
 import { ensureSenderPaired } from '../lib/pairing';
 
+const API_PORT = parseInt(process.env.TINYCLAW_API_PORT || '3777', 10);
+const API_BASE = `http://localhost:${API_PORT}`;
+
 const SCRIPT_DIR = path.resolve(__dirname, '..', '..');
 const _localTinyclaw = path.join(SCRIPT_DIR, '.tinyclaw');
 const TINYCLAW_HOME = process.env.TINYCLAW_HOME
     || (fs.existsSync(path.join(_localTinyclaw, 'settings.json'))
         ? _localTinyclaw
         : path.join(require('os').homedir(), '.tinyclaw'));
-const QUEUE_INCOMING = path.join(TINYCLAW_HOME, 'queue/incoming');
-const QUEUE_OUTGOING = path.join(TINYCLAW_HOME, 'queue/outgoing');
 const LOG_FILE = path.join(TINYCLAW_HOME, 'logs/telegram.log');
 const SETTINGS_FILE = path.join(TINYCLAW_HOME, 'settings.json');
 const FILES_DIR = path.join(TINYCLAW_HOME, 'files');
 const PAIRING_FILE = path.join(TINYCLAW_HOME, 'pairing.json');
 
 // Ensure directories exist
-[QUEUE_INCOMING, QUEUE_OUTGOING, path.dirname(LOG_FILE), FILES_DIR].forEach(dir => {
+[path.dirname(LOG_FILE), FILES_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -46,27 +47,6 @@ interface PendingMessage {
     chatId: number;
     messageId: number;
     timestamp: number;
-}
-
-interface QueueData {
-    channel: string;
-    sender: string;
-    senderId: string;
-    message: string;
-    timestamp: number;
-    messageId: string;
-    files?: string[];
-}
-
-interface ResponseData {
-    channel: string;
-    sender: string;
-    senderId?: string;
-    message: string;
-    originalMessage: string;
-    timestamp: number;
-    messageId: string;
-    files?: string[];
 }
 
 function sanitizeFileName(fileName: string): string {
@@ -97,6 +77,8 @@ function buildUniqueFilePath(dir: string, preferredName: string): string {
 // Track pending messages (waiting for response)
 const pendingMessages = new Map<string, PendingMessage>();
 let processingOutgoingQueue = false;
+let lastPollingActivity = Date.now();
+let pollingRestartInProgress = false;
 
 // Logger
 function log(level: string, message: string): void {
@@ -187,6 +169,27 @@ function splitMessage(text: string, maxLength = 4096): string[] {
     return chunks;
 }
 
+async function sendTelegramMessage(
+    chatId: number,
+    text: string,
+    options: TelegramBot.SendMessageOptions = {},
+): Promise<void> {
+    try {
+        await bot.sendMessage(chatId, text, {
+            parse_mode: 'Markdown',
+            ...options,
+        });
+    } catch (error) {
+        const message = (error as Error).message || '';
+        if (!message.toLowerCase().includes("can't parse entities")) {
+            throw error;
+        }
+
+        log('WARN', 'Failed to parse Telegram Markdown, retrying without Markdown parsing');
+        await bot.sendMessage(chatId, text, options);
+    }
+}
+
 // Download a file from URL to local path
 function downloadFile(url: string, destPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -208,7 +211,7 @@ function downloadFile(url: string, destPath: string): Promise<void> {
         }
 
         request.on('error', (err) => {
-            fs.unlink(destPath, () => {}); // Clean up on error
+            fs.unlink(destPath, () => { }); // Clean up on error
             reject(err);
         });
     });
@@ -262,12 +265,14 @@ const bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
 // Bot ready
 bot.getMe().then(async (me: TelegramBot.User) => {
     log('INFO', `Telegram bot connected as @${me.username}`);
+    lastPollingActivity = Date.now();
 
     // Register bot commands so they appear in Telegram's "/" menu
     await bot.setMyCommands([
         { command: 'agent', description: 'List available agents' },
         { command: 'team', description: 'List available teams' },
         { command: 'reset', description: 'Reset conversation history' },
+        { command: 'restart', description: 'Restart TinyClaw' },
     ]).catch((err: Error) => log('WARN', `Failed to register commands: ${err.message}`));
 
     log('INFO', 'Listening for messages...');
@@ -425,6 +430,17 @@ bot.on('message', async (msg: TelegramBot.Message) => {
             return;
         }
 
+        // Check for restart command
+        if (messageText.trim().match(/^[!/]restart$/i)) {
+            log('INFO', 'Restart command received');
+            await bot.sendMessage(msg.chat.id, 'Restarting TinyClaw...', {
+                reply_to_message_id: msg.message_id,
+            });
+            const { exec } = require('child_process');
+            exec(`"${path.join(SCRIPT_DIR, 'tinyclaw.sh')}" restart`, { detached: true, stdio: 'ignore' });
+            return;
+        }
+
         // Show typing indicator
         await bot.sendChatAction(msg.chat.id, 'typing');
 
@@ -435,19 +451,19 @@ bot.on('message', async (msg: TelegramBot.Message) => {
             fullMessage = fullMessage ? `${fullMessage}\n\n${fileRefs}` : fileRefs;
         }
 
-        // Write to incoming queue
-        const queueData: QueueData = {
-            channel: 'telegram',
-            sender: sender,
-            senderId: senderId,
-            message: fullMessage,
-            timestamp: Date.now(),
-            messageId: queueMessageId,
-            files: downloadedFiles.length > 0 ? downloadedFiles : undefined,
-        };
-
-        const queueFile = path.join(QUEUE_INCOMING, `telegram_${queueMessageId}.json`);
-        fs.writeFileSync(queueFile, JSON.stringify(queueData, null, 2));
+        // Write to queue via API
+        await fetch(`${API_BASE}/api/message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                channel: 'telegram',
+                sender,
+                senderId,
+                message: fullMessage,
+                messageId: queueMessageId,
+                files: downloadedFiles.length > 0 ? downloadedFiles : undefined,
+            }),
+        });
 
         log('INFO', `Queued message ${queueMessageId}`);
 
@@ -471,7 +487,7 @@ bot.on('message', async (msg: TelegramBot.Message) => {
     }
 });
 
-// Watch for responses in outgoing queue
+// Watch for responses via API
 async function checkOutgoingQueue(): Promise<void> {
     if (processingOutgoingQueue) {
         return;
@@ -480,15 +496,17 @@ async function checkOutgoingQueue(): Promise<void> {
     processingOutgoingQueue = true;
 
     try {
-        const files = fs.readdirSync(QUEUE_OUTGOING)
-            .filter(f => f.startsWith('telegram_') && f.endsWith('.json'));
+        const res = await fetch(`${API_BASE}/api/responses/pending?channel=telegram`);
+        if (!res.ok) return;
+        const responses = await res.json() as any[];
 
-        for (const file of files) {
-            const filePath = path.join(QUEUE_OUTGOING, file);
-
+        for (const resp of responses) {
             try {
-                const responseData: ResponseData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-                const { messageId, message: responseText, sender, senderId } = responseData;
+                const responseText = resp.message;
+                const messageId = resp.messageId;
+                const sender = resp.sender;
+                const senderId = resp.senderId;
+                const files: string[] = resp.files || [];
 
                 // Find pending message, or fall back to senderId for proactive messages
                 const pending = pendingMessages.get(messageId);
@@ -496,8 +514,8 @@ async function checkOutgoingQueue(): Promise<void> {
 
                 if (targetChatId && !Number.isNaN(targetChatId)) {
                     // Send any attached files first
-                    if (responseData.files && responseData.files.length > 0) {
-                        for (const file of responseData.files) {
+                    if (files.length > 0) {
+                        for (const file of files) {
                             try {
                                 if (!fs.existsSync(file)) continue;
                                 const ext = path.extname(file).toLowerCase();
@@ -520,33 +538,36 @@ async function checkOutgoingQueue(): Promise<void> {
                     // Split message if needed (Telegram 4096 char limit)
                     if (responseText) {
                         const chunks = splitMessage(responseText);
+                        const parseMode = resp.metadata?.parseMode as TelegramBot.ParseMode | undefined;
 
                         if (chunks.length > 0) {
-                            await bot.sendMessage(targetChatId, chunks[0]!, pending
+                            const opts: TelegramBot.SendMessageOptions = pending
                                 ? { reply_to_message_id: pending.messageId }
-                                : {},
-                            );
+                                : {};
+                            if (parseMode) opts.parse_mode = parseMode;
+                            await sendTelegramMessage(targetChatId, chunks[0]!, opts);
                         }
                         for (let i = 1; i < chunks.length; i++) {
-                            await bot.sendMessage(targetChatId, chunks[i]!);
+                            await sendTelegramMessage(targetChatId, chunks[i]!, parseMode ? { parse_mode: parseMode } : {});
                         }
                     }
 
-                    log('INFO', `Sent ${pending ? 'response' : 'proactive message'} to ${sender} (${responseText.length} chars${responseData.files ? `, ${responseData.files.length} file(s)` : ''})`);
+                    log('INFO', `Sent ${pending ? 'response' : 'proactive message'} to ${sender} (${responseText.length} chars${files.length > 0 ? `, ${files.length} file(s)` : ''})`);
 
                     if (pending) pendingMessages.delete(messageId);
-                    fs.unlinkSync(filePath);
+                    await fetch(`${API_BASE}/api/responses/${resp.id}/ack`, { method: 'POST' });
                 } else {
-                    log('WARN', `No pending message for ${messageId} and no valid senderId, cleaning up`);
-                    fs.unlinkSync(filePath);
+                    log('WARN', `No pending message for ${messageId} and no valid senderId, acking`);
+                    await fetch(`${API_BASE}/api/responses/${resp.id}/ack`, { method: 'POST' });
                 }
             } catch (error) {
-                log('ERROR', `Error processing response file ${file}: ${(error as Error).message}`);
-                // Don't delete file on error, might retry
+                log('ERROR', `Error processing response ${resp.id}: ${(error as Error).message}`);
+                // Don't ack on error, will retry next poll
             }
         }
     } catch (error) {
         log('ERROR', `Outgoing queue error: ${(error as Error).message}`);
+
     } finally {
         processingOutgoingQueue = false;
     }
@@ -564,9 +585,72 @@ setInterval(() => {
     }
 }, 4000);
 
-// Handle polling errors
+// Restart polling with proper cleanup to avoid duplicate polling loops
+async function restartPolling(reason: string, delayMs = 5000): Promise<void> {
+    if (pollingRestartInProgress) {
+        log('INFO', `Polling restart already in progress, skipping (${reason})`);
+        return;
+    }
+    pollingRestartInProgress = true;
+    log('WARN', `${reason} — stopping polling, will restart in ${delayMs / 1000}s...`);
+
+    try {
+        await bot.stopPolling();
+    } catch (e) {
+        log('WARN', `stopPolling error (ignored): ${(e as Error).message}`);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+
+    try {
+        log('INFO', `Restarting polling (${reason})...`);
+        await bot.startPolling();
+        lastPollingActivity = Date.now();
+        log('INFO', 'Polling restarted successfully');
+    } catch (e) {
+        log('ERROR', `Failed to restart polling: ${(e as Error).message}`);
+    } finally {
+        pollingRestartInProgress = false;
+    }
+}
+
+// Handle polling errors with automatic recovery
 bot.on('polling_error', (error: Error) => {
     log('ERROR', `Polling error: ${error.message}`);
+
+    // ETELEGRAM 409 = another instance running (stale connection after sleep)
+    // EFATAL = unrecoverable
+    if (error.message.includes('EFATAL') || error.message.includes('409')) {
+        restartPolling('Fatal polling error detected', 10000);
+    }
+});
+
+// Track polling activity — any event from the bot means polling is alive
+bot.on('message', () => { lastPollingActivity = Date.now(); });
+
+// Watchdog: if no polling activity for 2 minutes, verify connectivity before restarting
+setInterval(async () => {
+    const silentMs = Date.now() - lastPollingActivity;
+    if (silentMs > 2 * 60 * 1000) {
+        // Check if the bot can actually reach Telegram before deciding polling is dead
+        try {
+            await bot.getMe();
+            // API works fine — polling is just idle (no messages). Reset timer.
+            lastPollingActivity = Date.now();
+            log('INFO', `Watchdog: no messages for ${Math.round(silentMs / 1000)}s but API reachable, polling is healthy`);
+        } catch {
+            // API unreachable — polling is actually broken, restart it
+            restartPolling(`No polling activity for ${Math.round(silentMs / 1000)}s and API unreachable (watchdog)`, 5000);
+        }
+    }
+}, 30000);
+
+// Catch unhandled errors so we can see what kills the bot
+process.on('unhandledRejection', (reason) => {
+    log('ERROR', `Unhandled rejection: ${reason}`);
+});
+process.on('uncaughtException', (error) => {
+    log('ERROR', `Uncaught exception: ${error.message}\n${error.stack}`);
 });
 
 // Graceful shutdown

@@ -19,6 +19,19 @@ On first run, log your setup here so it persists across conversations:
 
 Keep this section updated and simple or complete first-time setup tasks.
 
+### System Prompt Setup
+
+On first run, if this file does not yet have a customized system prompt section below, ask the user:
+
+1. What role/personality should this agent have?
+2. What are the agent's primary responsibilities?
+3. Any specific instructions, constraints, or domain expertise?
+
+Draft a system prompt based on their answers and present it for approval before writing it here. Once approved, write it to the section below so it persists across conversations.
+
+#### System Prompt
+<!-- Write the approved system prompt here -->
+
 ## Team Communication
 
 You may be part of a team with other agents. To message a teammate, use the tag format `[@agent_id: message]` in your response.

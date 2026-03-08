@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { jsonrepair } from 'jsonrepair';
-import { Settings, AgentConfig, TeamConfig, CLAUDE_MODEL_IDS, CODEX_MODEL_IDS } from './types';
+import { Settings, AgentConfig, TeamConfig, CLAUDE_MODEL_IDS, CODEX_MODEL_IDS, OPENCODE_MODEL_IDS } from './types';
 
 export const SCRIPT_DIR = path.resolve(__dirname, '../..');
 const _localTinyclaw = path.join(SCRIPT_DIR, '.tinyclaw');
@@ -9,12 +9,8 @@ export const TINYCLAW_HOME = process.env.TINYCLAW_HOME
     || (fs.existsSync(path.join(_localTinyclaw, 'settings.json'))
         ? _localTinyclaw
         : path.join(require('os').homedir(), '.tinyclaw'));
-export const QUEUE_INCOMING = path.join(TINYCLAW_HOME, 'queue/incoming');
-export const QUEUE_OUTGOING = path.join(TINYCLAW_HOME, 'queue/outgoing');
-export const QUEUE_PROCESSING = path.join(TINYCLAW_HOME, 'queue/processing');
 export const LOG_FILE = path.join(TINYCLAW_HOME, 'logs/queue.log');
 export const SETTINGS_FILE = path.join(TINYCLAW_HOME, 'settings.json');
-export const EVENTS_DIR = path.join(TINYCLAW_HOME, 'events');
 export const CHATS_DIR = path.join(TINYCLAW_HOME, 'chats');
 export const FILES_DIR = path.join(TINYCLAW_HOME, 'files');
 
@@ -49,6 +45,9 @@ export function getSettings(): Settings {
             if (settings?.models?.openai) {
                 if (!settings.models) settings.models = {};
                 settings.models.provider = 'openai';
+            } else if (settings?.models?.opencode) {
+                if (!settings.models) settings.models = {};
+                settings.models.provider = 'opencode';
             } else if (settings?.models?.anthropic) {
                 if (!settings.models) settings.models = {};
                 settings.models.provider = 'anthropic';
@@ -70,6 +69,8 @@ export function getDefaultAgentFromModels(settings: Settings): AgentConfig {
     let model = '';
     if (provider === 'openai') {
         model = settings?.models?.openai?.model || 'gpt-5.3-codex';
+    } else if (provider === 'opencode') {
+        model = settings?.models?.opencode?.model || 'sonnet';
     } else {
         model = settings?.models?.anthropic?.model || 'sonnet';
     }
@@ -117,4 +118,12 @@ export function resolveClaudeModel(model: string): string {
  */
 export function resolveCodexModel(model: string): string {
     return CODEX_MODEL_IDS[model] || model || '';
+}
+
+/**
+ * Resolve the model ID for OpenCode (passed via --model flag).
+ * Falls back to the raw model string from settings if no mapping is found.
+ */
+export function resolveOpenCodeModel(model: string): string {
+    return OPENCODE_MODEL_IDS[model] || model || '';
 }

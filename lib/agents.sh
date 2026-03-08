@@ -4,12 +4,9 @@
 # AGENTS_DIR set after loading settings (uses workspace path)
 AGENTS_DIR=""
 
-# Ensure all agent workspaces have .agents/skills symlinked
+# Ensure all agent workspaces have .agents/skills copied from SCRIPT_DIR
 ensure_agent_skills_links() {
     local skills_src="$SCRIPT_DIR/.agents/skills"
-    if [ ! -d "$skills_src" ]; then
-        skills_src="$TINYCLAW_HOME/.agents/skills"
-    fi
     [ -d "$skills_src" ] || return 0
 
     local agents_dir="$WORKSPACE_PATH"
@@ -22,11 +19,30 @@ ensure_agent_skills_links() {
         local agent_dir="$agents_dir/$agent_id"
         [ -d "$agent_dir" ] || continue
 
-        if [ ! -e "$agent_dir/.agents/skills" ]; then
-            mkdir -p "$agent_dir/.agents"
-            ln -s "$skills_src" "$agent_dir/.agents/skills"
-            log "Linked .agents/skills/ for agent @${agent_id}"
+        # Migrate: replace old symlinks with real directories
+        if [ -L "$agent_dir/.agents/skills" ]; then
+            rm "$agent_dir/.agents/skills"
         fi
+        if [ -L "$agent_dir/.claude/skills" ]; then
+            rm "$agent_dir/.claude/skills"
+        fi
+
+        # Sync default skills into .agents/skills
+        # - Overwrites skills that exist in source (keeps them up to date)
+        # - Preserves agent-specific custom skills not in source
+        mkdir -p "$agent_dir/.agents/skills"
+        for skill_dir in "$skills_src"/*/; do
+            [ -d "$skill_dir" ] || continue
+            local skill_name
+            skill_name="$(basename "$skill_dir")"
+            # Always overwrite default skills with latest from source
+            rm -rf "$agent_dir/.agents/skills/$skill_name"
+            cp -r "$skill_dir" "$agent_dir/.agents/skills/$skill_name"
+        done
+
+        # Mirror .agents/skills into .claude/skills for Claude Code
+        mkdir -p "$agent_dir/.claude/skills"
+        cp -r "$agent_dir/.agents/skills/"* "$agent_dir/.claude/skills/" 2>/dev/null || true
     done
 }
 
@@ -133,9 +149,11 @@ agent_add() {
     echo "Provider:"
     echo "  1) Anthropic (Claude)"
     echo "  2) OpenAI (Codex)"
-    read -rp "Choose [1-2, default: 1]: " AGENT_PROVIDER_CHOICE
+    echo "  3) OpenCode"
+    read -rp "Choose [1-3, default: 1]: " AGENT_PROVIDER_CHOICE
     case "$AGENT_PROVIDER_CHOICE" in
         2) AGENT_PROVIDER="openai" ;;
+        3) AGENT_PROVIDER="opencode" ;;
         *) AGENT_PROVIDER="anthropic" ;;
     esac
 
@@ -145,18 +163,43 @@ agent_add() {
         echo "Model:"
         echo "  1) Sonnet (fast)"
         echo "  2) Opus (smartest)"
-        read -rp "Choose [1-2, default: 1]: " AGENT_MODEL_CHOICE
+        echo "  3) Custom (enter model name)"
+        read -rp "Choose [1-3, default: 1]: " AGENT_MODEL_CHOICE
         case "$AGENT_MODEL_CHOICE" in
             2) AGENT_MODEL="opus" ;;
+            3) read -rp "Enter model name: " AGENT_MODEL ;;
             *) AGENT_MODEL="sonnet" ;;
+        esac
+    elif [ "$AGENT_PROVIDER" = "opencode" ]; then
+        echo "Model (provider/model format):"
+        echo "  1) opencode/claude-sonnet-4-5"
+        echo "  2) opencode/claude-opus-4-6"
+        echo "  3) opencode/gemini-3-flash"
+        echo "  4) opencode/gemini-3-pro"
+        echo "  5) anthropic/claude-sonnet-4-5"
+        echo "  6) anthropic/claude-opus-4-6"
+        echo "  7) openai/gpt-5.3-codex"
+        echo "  8) Custom (enter model name)"
+        read -rp "Choose [1-8, default: 1]: " AGENT_MODEL_CHOICE
+        case "$AGENT_MODEL_CHOICE" in
+            2) AGENT_MODEL="opencode/claude-opus-4-6" ;;
+            3) AGENT_MODEL="opencode/gemini-3-flash" ;;
+            4) AGENT_MODEL="opencode/gemini-3-pro" ;;
+            5) AGENT_MODEL="anthropic/claude-sonnet-4-5" ;;
+            6) AGENT_MODEL="anthropic/claude-opus-4-6" ;;
+            7) AGENT_MODEL="openai/gpt-5.3-codex" ;;
+            8) read -rp "Enter model name (e.g. provider/model): " AGENT_MODEL ;;
+            *) AGENT_MODEL="opencode/claude-sonnet-4-5" ;;
         esac
     else
         echo "Model:"
         echo "  1) GPT-5.3 Codex"
         echo "  2) GPT-5.2"
-        read -rp "Choose [1-2, default: 1]: " AGENT_MODEL_CHOICE
+        echo "  3) Custom (enter model name)"
+        read -rp "Choose [1-3, default: 1]: " AGENT_MODEL_CHOICE
         case "$AGENT_MODEL_CHOICE" in
             2) AGENT_MODEL="gpt-5.2" ;;
+            3) read -rp "Enter model name: " AGENT_MODEL ;;
             *) AGENT_MODEL="gpt-5.3-codex" ;;
         esac
     fi
@@ -222,25 +265,17 @@ agent_add() {
         echo "  → Copied CLAUDE.md to .claude/ directory"
     fi
 
-    # Resolve skills source directory
+    # Copy default skills from SCRIPT_DIR
     local skills_src="$SCRIPT_DIR/.agents/skills"
-    if [ ! -d "$skills_src" ]; then
-        skills_src="$TINYCLAW_HOME/.agents/skills"
-    fi
-
     if [ -d "$skills_src" ]; then
-        # Symlink skills directory into .claude/skills
-        if [ ! -e "$AGENTS_DIR/$AGENT_ID/.claude/skills" ]; then
-            ln -s "$skills_src" "$AGENTS_DIR/$AGENT_ID/.claude/skills"
-            echo "  → Linked skills to .claude/skills/"
-        fi
+        mkdir -p "$AGENTS_DIR/$AGENT_ID/.agents/skills"
+        cp -r "$skills_src/"* "$AGENTS_DIR/$AGENT_ID/.agents/skills/" 2>/dev/null || true
+        echo "  → Copied skills to .agents/skills/"
 
-        # Symlink .agents/skills directory
-        if [ ! -e "$AGENTS_DIR/$AGENT_ID/.agents/skills" ]; then
-            mkdir -p "$AGENTS_DIR/$AGENT_ID/.agents"
-            ln -s "$skills_src" "$AGENTS_DIR/$AGENT_ID/.agents/skills"
-            echo "  → Linked skills to .agents/skills/"
-        fi
+        # Mirror into .claude/skills for Claude Code
+        mkdir -p "$AGENTS_DIR/$AGENT_ID/.claude/skills"
+        cp -r "$AGENTS_DIR/$AGENT_ID/.agents/skills/"* "$AGENTS_DIR/$AGENT_ID/.claude/skills/" 2>/dev/null || true
+        echo "  → Copied skills to .claude/skills/"
     fi
 
     # Create .tinyclaw directory and copy SOUL.md
@@ -271,6 +306,10 @@ agent_remove() {
         exit 1
     fi
 
+    # Load settings to get workspace path for cleanup.
+    load_settings
+    AGENTS_DIR="$WORKSPACE_PATH"
+
     local agent_json
     agent_json=$(jq -r "(.agents // {}).\"${agent_id}\" // empty" "$SETTINGS_FILE" 2>/dev/null)
 
@@ -282,6 +321,29 @@ agent_remove() {
     local agent_name
     agent_name=$(jq -r "(.agents // {}).\"${agent_id}\".name" "$SETTINGS_FILE" 2>/dev/null)
 
+    # Find all teams that currently include this agent.
+    local member_teams=()
+    local member_team_names=()
+    while IFS='|' read -r tid tname; do
+        [ -z "$tid" ] && continue
+        member_teams+=("$tid")
+        member_team_names+=("$tname")
+    done < <(jq -r --arg aid "$agent_id" \
+        '(.teams // {}) | to_entries[] | select(.value.agents | index($aid)) | "\(.key)|\(.value.name)"' \
+        "$SETTINGS_FILE" 2>/dev/null)
+
+    if [ ${#member_teams[@]} -gt 0 ]; then
+        echo -e "${YELLOW}Agent '${agent_id}' is in ${#member_teams[@]} team(s):${NC}"
+        local i
+        for i in "${!member_teams[@]}"; do
+            echo "  @${member_teams[$i]} - ${member_team_names[$i]}"
+        done
+        echo ""
+        echo "Continuing will remove this agent from those teams as well."
+        echo "If this agent is a team leader, a new leader will be auto-selected."
+        echo "If a team becomes empty, that team will be removed."
+    fi
+
     read -rp "Remove agent '${agent_id}' (${agent_name})? [y/N]: " CONFIRM
     if [[ ! "$CONFIRM" =~ ^[yY] ]]; then
         echo "Cancelled."
@@ -291,12 +353,92 @@ agent_remove() {
     local tmp_file="$SETTINGS_FILE.tmp"
     jq --arg id "$agent_id" 'del(.agents[$id])' "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
 
+    # Also remove this agent from any teams and keep team leaders valid.
+    local removed_from_teams=()
+    local removed_empty_teams=()
+    local reassigned_leaders=()
+    if [ ${#member_teams[@]} -gt 0 ]; then
+        local team_id
+        for team_id in "${member_teams[@]}"; do
+            # Team may already have been removed by an earlier iteration.
+            local team_exists
+            team_exists=$(jq -r --arg tid "$team_id" 'if ((.teams // {})[$tid]) then "yes" else "no" end' "$SETTINGS_FILE" 2>/dev/null)
+            if [ "$team_exists" != "yes" ]; then
+                continue
+            fi
+
+            local remaining_count
+            remaining_count=$(jq -r --arg tid "$team_id" --arg aid "$agent_id" \
+                '(((.teams // {})[$tid].agents // []) | map(select(. != $aid)) | length)' \
+                "$SETTINGS_FILE" 2>/dev/null)
+
+            if [ "$remaining_count" -lt 1 ]; then
+                jq --arg tid "$team_id" 'del(.teams[$tid])' "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
+                removed_empty_teams+=("$team_id")
+                continue
+            fi
+
+            local current_leader
+            current_leader=$(jq -r --arg tid "$team_id" '(.teams // {})[$tid].leader_agent // empty' "$SETTINGS_FILE" 2>/dev/null)
+            local new_leader="$current_leader"
+            if [ "$current_leader" = "$agent_id" ] || [ -z "$current_leader" ]; then
+                new_leader=$(jq -r --arg tid "$team_id" --arg aid "$agent_id" \
+                    '(((.teams // {})[$tid].agents // []) | map(select(. != $aid)) | .[0]) // empty' \
+                    "$SETTINGS_FILE" 2>/dev/null)
+            fi
+
+            jq --arg tid "$team_id" --arg aid "$agent_id" --arg leader "$new_leader" \
+                '.teams[$tid].agents |= map(select(. != $aid)) | .teams[$tid].leader_agent = $leader' \
+                "$SETTINGS_FILE" > "$tmp_file" && mv "$tmp_file" "$SETTINGS_FILE"
+
+            removed_from_teams+=("$team_id")
+            if [ "$current_leader" != "$new_leader" ]; then
+                reassigned_leaders+=("${team_id}:${new_leader}")
+            fi
+        done
+    fi
+
+    # Update AGENTS.md for teammates affected by membership changes.
+    if [ ${#member_teams[@]} -gt 0 ]; then
+        local affected_agent_ids
+        affected_agent_ids=$(jq -r --arg aid "$agent_id" \
+            '(.teams // {}) | to_entries[] | select(.value.agents | index($aid)) | .value.agents[]' \
+            "$SETTINGS_FILE" 2>/dev/null)
+        # Include remaining current members from previously impacted teams.
+        local team_id
+        for team_id in "${member_teams[@]}"; do
+            while IFS= read -r member_id; do
+                affected_agent_ids+=$'\n'"$member_id"
+            done < <(jq -r --arg tid "$team_id" '((.teams // {})[$tid].agents // [])[]' "$SETTINGS_FILE" 2>/dev/null)
+        done
+        while IFS= read -r affected_id; do
+            [ -z "$affected_id" ] && continue
+            [ "$affected_id" = "$agent_id" ] && continue
+            update_agent_team_info "$affected_id"
+        done < <(printf '%s\n' "$affected_agent_ids" | awk 'NF' | sort -u)
+    fi
+
     # Clean up agent state directory
     if [ -d "$AGENTS_DIR/$agent_id" ]; then
         rm -rf "$AGENTS_DIR/$agent_id"
     fi
 
     echo -e "${GREEN}✓ Agent '${agent_id}' removed.${NC}"
+    if [ ${#removed_from_teams[@]} -gt 0 ]; then
+        echo "  Removed from teams: ${removed_from_teams[*]}"
+    fi
+    if [ ${#reassigned_leaders[@]} -gt 0 ]; then
+        echo "  Reassigned leaders:"
+        local entry
+        for entry in "${reassigned_leaders[@]}"; do
+            local tid="${entry%%:*}"
+            local lid="${entry##*:}"
+            echo "    @${tid} -> @${lid}"
+        done
+    fi
+    if [ ${#removed_empty_teams[@]} -gt 0 ]; then
+        echo "  Removed empty teams: ${removed_empty_teams[*]}"
+    fi
 }
 
 # Set provider and/or model for a specific agent

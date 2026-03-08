@@ -7,7 +7,8 @@ Common issues and solutions for TinyClaw.
 ### Bash version error on macOS
 
 If you see:
-```
+
+```text
 Error: This script requires bash 4.0 or higher (you have 3.2.57)
 ```
 
@@ -47,11 +48,13 @@ tinyclaw restart
 ```
 
 **Common causes:**
+
 - QR code expired (scan within 60 seconds)
 - Session files corrupted
 - Multiple WhatsApp Web sessions active
 
 **Solution:**
+
 1. Delete session: `rm -rf .tinyclaw/whatsapp-session/`
 2. Restart: `tinyclaw restart`
 3. Scan new QR code immediately
@@ -67,6 +70,7 @@ tinyclaw setup
 ```
 
 **Checklist:**
+
 - ✅ Bot token is correct
 - ✅ "Message Content Intent" is enabled in Discord Developer Portal
 - ✅ Bot has permissions to read/send messages
@@ -83,6 +87,7 @@ tinyclaw setup
 ```
 
 **Common issues:**
+
 - Bot token is invalid or revoked
 - Bot wasn't started (send `/start` to your bot first)
 - Bot removed from group
@@ -95,6 +100,7 @@ tmux attach -t tinyclaw
 ```
 
 The QR code appears in the WhatsApp pane. If it's not visible:
+
 1. Check if WhatsApp is enabled: `cat .tinyclaw/settings.json | jq '.channels.enabled'`
 2. Check WhatsApp process: `pgrep -f whatsapp-client.ts`
 3. View logs: `tail -f .tinyclaw/logs/whatsapp.log`
@@ -107,41 +113,76 @@ The QR code appears in the WhatsApp pane. If it's not visible:
 # Check queue processor status
 tinyclaw status
 
-# Check incoming queue
-ls -la .tinyclaw/queue/incoming/
+# Check queue status via API
+curl http://localhost:3777/api/queue/status | jq
 
 # View queue logs
 tinyclaw logs queue
 ```
 
 **Checklist:**
+
 - ✅ Queue processor is running
 - ✅ Claude Code CLI is installed: `claude --version`
-- ✅ Messages aren't stuck in processing: `ls .tinyclaw/queue/processing/`
+- ✅ No dead messages: `curl http://localhost:3777/api/queue/dead | jq`
 
 ### Messages stuck in processing
 
-This happens when the queue processor crashes mid-message:
+Messages stuck in `processing` state are automatically recovered after 10
+minutes. To force recovery:
 
 ```bash
-# Clear stuck messages
-rm -rf .tinyclaw/queue/processing/*
-
-# Restart TinyClaw
+# Restart TinyClaw (triggers stale message recovery on startup)
 tinyclaw restart
 ```
 
 ### Responses not being sent
 
 ```bash
-# Check outgoing queue
-ls -la .tinyclaw/queue/outgoing/
+# Check responses via API
+curl http://localhost:3777/api/responses | jq
 
 # Check channel client logs
 tinyclaw logs discord
 tinyclaw logs telegram
 tinyclaw logs whatsapp
 ```
+
+## Model / Provider Issues
+
+### Model or provider change has no effect
+
+If `tinyclaw model` or `tinyclaw provider` doesn't seem to change the model your agents use:
+
+1. **Check what agents actually run with:**
+
+   ```bash
+   tinyclaw model
+   # or
+   tinyclaw provider
+   ```
+
+   Both show the global default **and** per-agent breakdown. If an agent still shows the old model, the change didn't propagate.
+
+2. **Agents override the global default.** When agents exist in `settings.json`, each agent's own `provider`/`model` fields are used — the global `models` section is only a fallback when no agents are configured.
+
+3. **Use `--model` with provider switches.** `tinyclaw provider <name>` (without `--model`) only changes the global default and does **not** update agents. Add `--model` to propagate:
+
+   ```bash
+   tinyclaw provider openai --model gpt-5.3-codex
+   ```
+
+4. **Override a single agent:** Use `tinyclaw agent provider` for per-agent control:
+
+   ```bash
+   tinyclaw agent provider coder anthropic --model opus
+   ```
+
+5. **Verify settings file is valid JSON:**
+
+   ```bash
+   jq . .tinyclaw/settings.json
+   ```
 
 ## Agent Issues
 
@@ -150,16 +191,19 @@ tinyclaw logs whatsapp
 If you see "Agent 'xyz' not found":
 
 1. Check agent exists:
+
    ```bash
    tinyclaw agent list
    ```
 
 2. Verify agent ID is lowercase and matches exactly:
+
    ```bash
    cat .tinyclaw/settings.json | jq '.agents'
    ```
 
 3. Check settings file is valid JSON:
+
    ```bash
    cat .tinyclaw/settings.json | jq
    ```
@@ -174,11 +218,13 @@ If messages go to the wrong agent:
    - ❌ Wrong: `@ coder fix the bug` (space before agent_id)
 
 2. **Verify agent exists:**
+
    ```bash
    tinyclaw agent show coder
    ```
 
 3. **Check logs:**
+
    ```bash
    tail -f .tinyclaw/logs/queue.log | grep "Routing"
    ```
@@ -188,6 +234,7 @@ If messages go to the wrong agent:
 If `@agent /reset` doesn't work:
 
 1. Check reset flag exists:
+
    ```bash
    ls ~/tinyclaw-workspace/{agent_id}/reset_flag
    ```
@@ -203,6 +250,7 @@ If `@agent /reset` doesn't work:
 If agent can't execute (error: `command not found`):
 
 **For Anthropic agents:**
+
 ```bash
 # Check Claude CLI is installed
 claude --version
@@ -212,6 +260,7 @@ claude --version
 ```
 
 **For OpenAI agents:**
+
 ```bash
 # Check Codex CLI is installed
 codex --version
@@ -225,21 +274,25 @@ codex login
 If agents aren't being created:
 
 1. Check workspace path:
+
    ```bash
    cat .tinyclaw/settings.json | jq '.workspace.path'
    ```
 
 2. Verify workspace exists:
+
    ```bash
    ls ~/tinyclaw-workspace/
    ```
 
 3. Check permissions:
+
    ```bash
    ls -la ~/tinyclaw-workspace/
    ```
 
 4. Manually create if needed:
+
    ```bash
    mkdir -p ~/tinyclaw-workspace
    ```
@@ -249,16 +302,19 @@ If agents aren't being created:
 If new agents don't have `.claude/`, `heartbeat.md`, or `AGENTS.md`:
 
 1. Check templates exist:
+
    ```bash
    ls -la ~/.tinyclaw/{.claude,heartbeat.md,AGENTS.md}
    ```
 
 2. Run setup to create templates:
+
    ```bash
    tinyclaw setup
    ```
 
 3. Manually copy if needed:
+
    ```bash
    cp -r .claude ~/.tinyclaw/
    cp heartbeat.md ~/.tinyclaw/
@@ -272,16 +328,19 @@ If new agents don't have `.claude/`, `heartbeat.md`, or `AGENTS.md`:
 If you see "Could not fetch latest version":
 
 1. **Check internet connection:**
+
    ```bash
    curl -I https://api.github.com
    ```
 
 2. **Check GitHub API rate limit:**
+
    ```bash
    curl https://api.github.com/rate_limit
    ```
 
 3. **Disable update checks:**
+
    ```bash
    export TINYCLAW_SKIP_UPDATE_CHECK=1
    tinyclaw start
@@ -292,13 +351,14 @@ If you see "Could not fetch latest version":
 If bundle download fails during update:
 
 1. **Check release exists:**
-   - Visit: https://github.com/jlia0/tinyclaw/releases
+   - Visit: <https://github.com/TinyAGI/tinyclaw/releases>
    - Verify bundle file is attached
 
 2. **Manual update:**
+
    ```bash
    # Download bundle manually
-   wget https://github.com/jlia0/tinyclaw/releases/latest/download/tinyclaw-bundle.tar.gz
+   wget https://github.com/TinyAGI/tinyclaw/releases/latest/download/tinyclaw-bundle.tar.gz
 
    # Extract to temp directory
    mkdir temp-update
@@ -337,11 +397,13 @@ top -o cpu | grep -E 'claude|codex|node'
 ```
 
 **Common causes:**
+
 - Long-running AI tasks
 - Stuck message processing
 - Too many concurrent operations
 
 **Solutions:**
+
 - Wait for current task to complete
 - Restart: `tinyclaw restart`
 - Reduce heartbeat frequency in settings
@@ -354,6 +416,7 @@ ps aux | grep -E 'claude|codex|node' | awk '{print $4, $11}'
 ```
 
 **Solutions:**
+
 - Restart TinyClaw: `tinyclaw restart`
 - Reset conversations: `tinyclaw reset`
 - Clear old sessions: `rm -rf .tinyclaw/whatsapp-session/.wwebjs_*`
@@ -361,18 +424,15 @@ ps aux | grep -E 'claude|codex|node' | awk '{print $4, $11}'
 ### Slow message responses
 
 1. **Check queue depth:**
+
    ```bash
-   ls .tinyclaw/queue/incoming/ | wc -l
+   curl http://localhost:3777/api/queue/status | jq
    ```
 
-2. **Check processing queue:**
-   ```bash
-   ls .tinyclaw/queue/processing/
-   ```
+2. **Monitor AI response time:**
 
-3. **Monitor AI response time:**
    ```bash
-   tail -f .tinyclaw/logs/queue.log | grep "Processing completed"
+   tail -f .tinyclaw/logs/queue.log | grep "Response ready"
    ```
 
 ## Log Analysis
@@ -390,21 +450,25 @@ tinyclaw restart
 ### Useful log patterns
 
 **Find errors:**
+
 ```bash
 grep -i error .tinyclaw/logs/*.log
 ```
 
 **Track message routing:**
+
 ```bash
 grep "Routing" .tinyclaw/logs/queue.log
 ```
 
 **Monitor agent activity:**
+
 ```bash
 tail -f .tinyclaw/logs/queue.log | grep "agent:"
 ```
 
 **Check heartbeat timing:**
+
 ```bash
 grep "Heartbeat" .tinyclaw/logs/heartbeat.log
 ```
@@ -412,24 +476,27 @@ grep "Heartbeat" .tinyclaw/logs/heartbeat.log
 ## Still Having Issues?
 
 1. **Check status:**
+
    ```bash
    tinyclaw status
    ```
 
 2. **View all logs:**
+
    ```bash
    tinyclaw logs all
    ```
 
 3. **Restart from scratch:**
+
    ```bash
    tinyclaw stop
-   rm -rf .tinyclaw/queue/*
+   rm -f .tinyclaw/tinyclaw.db
    tinyclaw start
    ```
 
 4. **Report issue:**
-   - GitHub Issues: https://github.com/jlia0/tinyclaw/issues
+   - GitHub Issues: <https://github.com/TinyAGI/tinyclaw/issues>
    - Include logs and error messages
    - Describe steps to reproduce
 
@@ -440,7 +507,7 @@ Quick reference for common recovery scenarios:
 ```bash
 # Full reset (preserves settings)
 tinyclaw stop
-rm -rf .tinyclaw/queue/*
+rm -f .tinyclaw/tinyclaw.db
 rm -rf .tinyclaw/channels/*
 rm -rf .tinyclaw/whatsapp-session/*
 tinyclaw start
@@ -450,7 +517,7 @@ cd ~/tinyclaw
 ./scripts/uninstall.sh
 cd ..
 rm -rf tinyclaw
-curl -fsSL https://raw.githubusercontent.com/jlia0/tinyclaw/main/scripts/remote-install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/TinyAGI/tinyclaw/main/scripts/remote-install.sh | bash
 
 # Reset single agent
 tinyclaw agent reset coder

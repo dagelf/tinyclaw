@@ -32,7 +32,7 @@ User: "@dev fix the auth bug"
 
 1. User sends `@team_id message` (or `@agent_id` where agent belongs to a team)
 2. Queue processor resolves the team and invokes the **leader agent**
-3. `[@teammate: message]` tags in the response become new messages in `QUEUE_INCOMING`
+3. `[@teammate: message]` tags in the response become new messages in the queue
 4. Each mentioned agent processes its message via its own promise chain (parallel across agents)
 5. If an agent's response mentions more teammates, those become new messages too
 6. When all branches resolve (`pending === 0`), responses are aggregated and sent to the user
@@ -160,6 +160,8 @@ tinyclaw team list              # List all teams
 tinyclaw team add               # Add a new team (interactive wizard)
 tinyclaw team show dev          # Show team configuration
 tinyclaw team remove dev        # Remove a team
+tinyclaw team add-agent dev reviewer     # Add @reviewer to @dev
+tinyclaw team remove-agent dev reviewer  # Remove @reviewer from @dev
 tinyclaw team visualize [id]    # Live TUI dashboard
 ```
 
@@ -173,7 +175,7 @@ tinyclaw team visualize [id]    # Live TUI dashboard
 
 ## Events
 
-Team conversations emit events to `~/.tinyclaw/events/` for the visualizer and external tooling:
+Team conversations emit events via SSE (`GET /api/events/stream`) for the visualizer and web dashboard:
 
 | Event | Description |
 |-------|-------------|
